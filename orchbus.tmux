@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # orchbus — tmux plugin entry point.
 #
-# Registers `prefix + o` to open the cockpit: a popup listing every Claude Code
-# session across all panes, from which you triage and approve their prompts
-# without tabbing between windows. See scripts/orchbus.sh for the keys.
+# The cockpit lists every Claude Code session across all panes so you can triage
+# and approve their prompts without tabbing between windows. See scripts/orchbus.sh
+# for the keys. Two ways to open it:
+#     prefix o  -> as a display-popup (ephemeral overlay)
+#     prefix O  -> as a real tmux window (persists, shows in the window list)
 #
 # Load it from ~/.tmux.conf with:
 #     run-shell '~/.dotfiles/tmux/orchbus/orchbus.tmux'
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 tmux bind-key o display-popup -E -w 100% -h 100% "$CURRENT_DIR/scripts/orchbus.sh"
+tmux bind-key O new-window -n orchbus "$CURRENT_DIR/scripts/orchbus.sh"
