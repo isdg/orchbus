@@ -12,4 +12,4 @@
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 tmux bind-key o display-popup -E -w 100% -h 100% "$CURRENT_DIR/scripts/orchbus.sh"
-tmux bind-key O new-window -n orchbus "$CURRENT_DIR/scripts/orchbus.sh"
+tmux bind-key O run-shell "$CURRENT_DIR/scripts/open.sh"
