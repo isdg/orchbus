@@ -63,8 +63,7 @@ under you on a refresh; sort by `pane_id` alone (a fixed position) if you prefer
 
 | Key | Action |
 |---|---|
-| `ctrl-a` | **approve** — accept the highlighted default option (safe primary) |
-| `ctrl-y` | pick option **1 (Yes)** explicitly |
+| `ctrl-a` | **approve** — accept the highlighted default "Yes" (safe primary) |
 | `ctrl-x` | **cancel** the prompt (Esc) |
 | `ctrl-d` | **dismiss** the "How is Claude doing?" rating (`[o]` rows only) |
 | `ctrl-r` | refresh now |
@@ -76,13 +75,12 @@ auto-refreshes ~1s, so approve one → the row updates → move to the next.
 
 ## Safety
 
-- Only `[!]` approval prompts can be approved. `ctrl-a`/`ctrl-y` route through
+- Only `[!]` approval prompts can be approved. `ctrl-a` routes through
   `guard-approve.sh`, which **re-captures the pane and only sends the key if the
   approval menu is still there** — so a prompt that closed between the scan and
   your keypress never catches a stray keystroke, and rating/interrupted/idle/
   running panes (no `❯ N.` menu) are no-ops.
-- `enter`-accept-default is the primary action; digit-picks and cancel are
-  separate explicit keys.
+- Approve just accepts the highlighted default "Yes"; cancel is a separate key.
 - Every tmux command targets a unique **pane_id** — no session/window guessing.
 
 ## Maintenance
