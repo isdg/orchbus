@@ -66,6 +66,7 @@ under you on a refresh; sort by `pane_id` alone (a fixed position) if you prefer
 | `ctrl-a` | **approve** — accept the highlighted default option (safe primary) |
 | `ctrl-y` | pick option **1 (Yes)** explicitly |
 | `ctrl-x` | **cancel** the prompt (Esc) |
+| `ctrl-d` | **dismiss** the "How is Claude doing?" rating (`[o]` rows only) |
 | `ctrl-r` | refresh now |
 | `enter`  | **jump** to that pane (closes the popup) |
 | type     | fuzzy-filter the list |

@@ -10,6 +10,7 @@
 #   ctrl-a  approve (accept the highlighted default — safe primary action)
 #   ctrl-y  pick option 1 (Yes) explicitly
 #   ctrl-x  cancel the prompt (Esc)
+#   ctrl-d  dismiss the "How is Claude doing?" rating ([o] rows only)
 #   ctrl-r  refresh now
 #   enter   jump to that pane (closes the popup)
 #
@@ -34,7 +35,7 @@ exec fzf \
   --delimiter='\t' \
   --with-nth=2.. \
   --prompt='orchbus> ' \
-  --header='ctrl-a approve · ctrl-y yes(1) · ctrl-x cancel · ctrl-r refresh · enter jump' \
+  --header='ctrl-a approve · ctrl-y yes(1) · ctrl-x cancel · ctrl-d dismiss-rating · ctrl-r refresh · enter jump' \
   --preview 'tmux capture-pane -ep -t {1} | tail -n "${FZF_PREVIEW_LINES:-40}"' \
   --preview-window='down,70%' \
   --preview-label=' pane ' \
@@ -44,4 +45,5 @@ exec fzf \
   --bind "ctrl-a:execute-silent($GUARD {1} enter)+reload($SCAN)" \
   --bind "ctrl-y:execute-silent($GUARD {1} 1)+reload($SCAN)" \
   --bind "ctrl-x:execute-silent(tmux send-keys -t {1} Escape)+reload($SCAN)" \
+  --bind "ctrl-d:execute-silent($GUARD {1} dismiss)+reload($SCAN)" \
   --bind "enter:execute-silent(tmux switch-client -t {1}; tmux select-window -t {1}; tmux select-pane -t {1})+abort"
