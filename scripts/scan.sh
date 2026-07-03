@@ -64,28 +64,70 @@ state_meta() {
   esac
 }
 
-# One row per pane whose foreground command is `claude`. An exited CC (shell now
-# showing) reports zsh/bash and is filtered out; two CC panes in one window get
-# distinct pane_ids => two rows. TAB-delimited enumeration; IFS split on tab.
 TAB="$(printf '\t')"
-tmux list-panes -a -F "#{pane_id}${TAB}#{pane_current_command}${TAB}#{session_name}:#{window_index}${TAB}#{pane_title}" 2>/dev/null |
-while IFS="$TAB" read -r pid cmd swin title; do
-  [ "$cmd" = claude ] || continue
-  txt="$(tmux capture-pane -p -t "$pid" 2>/dev/null | tail -n "$TAIL_LINES")" || continue
-  [ -n "$txt" ] || continue
+CACHE="${TMPDIR:-/tmp}/orchbus.cache"
 
+# scan_pane <pid> <swin> <title> -> the 6-field row
+#   rank<TAB>pid<TAB>glyph<TAB>swin<TAB>title<TAB>question
+# for one pane, or nothing if it isn't a live CC pane. (The leading rank drives
+# the importance sort; it's dropped before the list reaches fzf.)
+scan_pane() {
+  local pid="$1" swin="$2" title="$3" txt meta rank glyph q
+  txt="$(tmux capture-pane -p -t "$pid" 2>/dev/null | tail -n "$TAIL_LINES")" || return
+  [ -n "$txt" ] || return
   meta="$(state_meta "$(classify "$txt")")"   # "rank glyph", e.g. "1 [!]"
   rank="${meta%% *}"; glyph="${meta#* }"      # split without word-splitting (glyphs are glob chars)
-
-  # Prefer the on-screen question (a line ending in ?); fall back to the CC
-  # conversation topic (pane_title). Strip tabs so the TSV stays well-formed.
+  # Prefer the on-screen question (a line ending in ?); else the CC topic
+  # (pane_title). Strip tabs so the TSV stays well-formed.
   q="$(printf '%s\n' "$txt" | grep -m1 -E '\?[[:space:]]*$' \
         | sed -E 's/^[[:space:]]*//; s/[[:space:]]+/ /g' | tr -d "$TAB")"
   [ -n "$q" ] || q="$title"
-
   title="$(printf '%s' "$title" | tr -d "$TAB")"
-  # Leading rank column drives the sort, then is stripped so field 1 stays pane_id.
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rank" "$pid" "$glyph" "$swin" "$title" "$q"
-done | sort -t"$TAB" -k1,1n -k2,2 | cut -f2-
-# ^ sort by importance rank (numeric), pane_id as a stable within-tier tiebreaker,
-#   then drop the rank column. Most-actionable sessions land at the top.
+}
+
+# finalize: read 6-field rows on stdin, sort by importance (rank, then pane_id),
+# cache them atomically (WITH rank, so a later single-pane splice can re-sort),
+# and print the 5-field list (rank stripped, pane_id first) for fzf.
+finalize() {
+  local sorted; sorted="$(sort -t"$TAB" -k1,1n -k2,2)"
+  { [ -n "$sorted" ] && printf '%s\n' "$sorted"; } > "$CACHE.$$" && mv -f "$CACHE.$$" "$CACHE"
+  [ -n "$sorted" ] && printf '%s\n' "$sorted" | cut -f2-
+  return 0
+}
+
+# Every CC pane across all sessions (exited CC -> zsh/bash, filtered out; two CC
+# panes in one window -> two pane_ids -> two rows).
+scan_all() {
+  tmux list-panes -a -F "#{pane_id}${TAB}#{pane_current_command}${TAB}#{session_name}:#{window_index}${TAB}#{pane_title}" 2>/dev/null |
+  while IFS="$TAB" read -r pid cmd swin title; do
+    [ "$cmd" = claude ] || continue
+    scan_pane "$pid" "$swin" "$title"
+  done
+}
+
+# Dispatch:
+#   scan.sh          -> full scan of every CC pane (on open + ~1s auto-refresh).
+#   scan.sh <pane>   -> rescan ONLY that pane and splice its fresh row into the
+#                       cached list, so the row you just approved/cancelled updates
+#                       instantly WITHOUT rescanning all ~20 panes. Falls back to a
+#                       full scan if there's no cache yet (shouldn't happen: the
+#                       popup's start-event runs a full scan before any keypress).
+if [ -n "${1:-}" ] && [ -f "$CACHE" ]; then
+  pid="$1"
+  info="$(tmux list-panes -a -F "#{pane_id}${TAB}#{pane_current_command}${TAB}#{session_name}:#{window_index}${TAB}#{pane_title}" 2>/dev/null \
+          | awk -F"$TAB" -v p="$pid" '$1==p{print; exit}')"
+  IFS="$TAB" read -r xpid cmd swin title <<EOF
+$info
+EOF
+  newrow=""
+  [ "$cmd" = claude ] && newrow="$(scan_pane "$pid" "$swin" "$title")"
+  # Cached rows for every OTHER pane (drop this pid's line: "rank<TAB>pid<TAB>…"),
+  # plus this pane's fresh row if it's still a CC pane (gone -> the row disappears).
+  {
+    grep -vE "^[0-9]+${TAB}${pid}${TAB}" "$CACHE" 2>/dev/null
+    [ -n "$newrow" ] && printf '%s\n' "$newrow"
+  } | finalize
+else
+  scan_all | finalize
+fi

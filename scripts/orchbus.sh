@@ -40,6 +40,6 @@ exec fzf \
   --bind "start:reload($SCAN)" \
   --bind "load:reload-sync(sleep 1; $SCAN)" \
   --bind "ctrl-r:reload($SCAN)" \
-  --bind "ctrl-a:execute-silent($GUARD {1} enter)" \
-  --bind "ctrl-x:execute-silent(tmux send-keys -t {1} Escape)" \
+  --bind "ctrl-a:execute-silent($GUARD {1} enter)+reload($SCAN {1})" \
+  --bind "ctrl-x:execute-silent(tmux send-keys -t {1} Escape)+reload($SCAN {1})" \
   --bind "enter:execute-silent(tmux switch-client -t {1}; tmux select-window -t {1}; tmux select-pane -t {1})+abort"
