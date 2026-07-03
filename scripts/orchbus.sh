@@ -12,7 +12,7 @@
 #   ctrl-r  refresh now
 #   enter   jump to that pane (closes the popup)
 #
-# Requires fzf >= 0.36 (start/load events, reload-sync); you have 0.70.
+# Requires fzf >= 0.36 (start/load events); you have 0.70.
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,9 +26,18 @@ fi
 
 # Field 1 (pane_id) is hidden from matching (--with-nth=2..) but stays available
 # as {1} in every bind/preview. Parse-clean text comes from scan.sh; the preview
-# uses -ep to keep color. The load->sleep->reload self-loop is the ~1s poll: each
-# finished reload re-fires `load`, so scans pace themselves and never stack.
-exec fzf \
+# uses -ep to keep color.
+#
+# Instant open: the initial list is piped in from the LAST cached scan (`--cache`,
+# ~0.01s), which the long-lived `prefix O` window keeps warm via its refresh loop.
+# We deliberately do NOT bind `start:reload` — that fires at startup and makes fzf
+# DISCARD the piped cache to re-read from a full ~1s scan, blocking the first paint
+# (this was why the popup felt slow). Instead the refresh is driven entirely by the
+# load->sleep->reload self-loop: `load` fires once the piped cache is read, then each
+# finished reload re-fires `load`, so a fresh full scan swaps in ~1s after open and
+# every ~1s after. Plain `reload` (async) NOT `reload-sync` — sync would freeze the
+# UI (block all input) for the whole sleep+scan (~1.7s) every cycle.
+"$SCAN" --cache | fzf \
   --reverse \
   --delimiter='\t' \
   --with-nth=2.. \
@@ -37,8 +46,7 @@ exec fzf \
   --preview 'tmux capture-pane -ep -t {1} | tail -n "${FZF_PREVIEW_LINES:-40}"' \
   --preview-window='down,70%' \
   --preview-label=' pane ' \
-  --bind "start:reload($SCAN)" \
-  --bind "load:reload-sync(sleep 1; $SCAN)" \
+  --bind "load:reload(sleep 1; $SCAN)" \
   --bind "ctrl-r:reload($SCAN)" \
   --bind "ctrl-a:execute-silent($GUARD {1} enter)+reload($SCAN {1})" \
   --bind "ctrl-x:execute-silent(tmux send-keys -t {1} Escape)+reload($SCAN {1})" \

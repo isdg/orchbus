@@ -107,12 +107,21 @@ scan_all() {
 }
 
 # Dispatch:
+#   scan.sh --cache  -> print the LAST cached list instantly (no scanning). Used
+#                       for the popup's initial paint so it opens with zero wait;
+#                       the long-lived `prefix O` window keeps this cache warm via
+#                       its ~1s auto-refresh. Empty if nothing has scanned yet.
 #   scan.sh          -> full scan of every CC pane (on open + ~1s auto-refresh).
 #   scan.sh <pane>   -> rescan ONLY that pane and splice its fresh row into the
 #                       cached list, so the row you just approved/cancelled updates
 #                       instantly WITHOUT rescanning all ~20 panes. Falls back to a
 #                       full scan if there's no cache yet (shouldn't happen: the
 #                       popup's start-event runs a full scan before any keypress).
+if [ "${1:-}" = "--cache" ]; then
+  [ -f "$CACHE" ] && cut -f2- "$CACHE"    # strip the rank column; print 5-field list
+  exit 0
+fi
+
 if [ -n "${1:-}" ] && [ -f "$CACHE" ]; then
   pid="$1"
   info="$(tmux list-panes -a -F "#{pane_id}${TAB}#{pane_current_command}${TAB}#{session_name}:#{window_index}${TAB}#{pane_title}" 2>/dev/null \
