@@ -9,4 +9,4 @@
 #     run-shell '~/.dotfiles/tmux/orchbus/orchbus.tmux'
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-tmux bind-key o display-popup -E -w 90% -h 80% "$CURRENT_DIR/scripts/orchbus.sh"
+tmux bind-key o display-popup -E -w 90% -h 95% "$CURRENT_DIR/scripts/orchbus.sh"

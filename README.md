@@ -40,6 +40,25 @@ Opens the cockpit popup. One row per Claude Code pane:
 | `[=]` | IDLE | prompt box, ball's in your court |
 | `[o]` | rating | the optional "How is Claude doing?" prompt — never auto-approved |
 
+### Sort order
+
+Rows are sorted by **importance** — the sessions that most want your attention
+float to the top:
+
+```
+[!] approve  >  [?] input  >  [*] running  >  [=] idle  >  [o] rating  >  [.] unknown
+```
+
+Within a tier, rows are ordered by `pane_id` so the list is deterministic across
+the ~1s auto-refresh. The ranking lives in one place — the `state_meta` function
+near the top of `scripts/scan.sh` (`APPROVE=1 … UNKNOWN=6`); edit those numbers
+to reorder.
+
+Because the list is state-sorted, approving a `[!]` makes it change state and
+sink down the list, so the next actionable session rises toward your cursor —
+the intended triage flow. The trade-off is that the highlighted row can shift
+under you on a refresh; sort by `pane_id` alone (a fixed position) if you prefer.
+
 ### Keys (inside the popup)
 
 | Key | Action |

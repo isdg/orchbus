@@ -35,8 +35,9 @@ exec fzf \
   --with-nth=2.. \
   --prompt='orchbus> ' \
   --header='ctrl-a approve · ctrl-y yes(1) · ctrl-x cancel · ctrl-r refresh · enter jump' \
-  --preview "tmux capture-pane -ep -t {1}" \
-  --preview-window=down:60% \
+  --preview 'tmux capture-pane -ep -t {1} | tail -n "${FZF_PREVIEW_LINES:-40}"' \
+  --preview-window='down,70%' \
+  --preview-label=' pane ' \
   --bind "start:reload($SCAN)" \
   --bind "load:reload-sync(sleep 1; $SCAN)" \
   --bind "ctrl-r:reload($SCAN)" \

@@ -35,19 +35,33 @@ GLYPH_IDLE='[=]';    GLYPH_RATE='[o]';  GLYPH_UNKNOWN='[.]'
 TAIL_LINES=25
 # ────────────────────────────────────────────────────────────────────────────
 
-# classify <captured-text> -> prints one glyph. Order matters (first match wins):
-# rating is checked before approval so the optional prompt is never mistaken for
-# an approvable menu; the structural ❯N. menu beats prose; the elapsed timer is
-# the trusted RUNNING signal, spinner glyphs only a fallback.
+# classify <captured-text> -> prints one STATE name. Order matters (first match
+# wins): rating is checked before approval so the optional prompt is never
+# mistaken for an approvable menu; the structural ❯N. menu beats prose; the
+# elapsed timer is the trusted RUNNING signal.
 classify() {
   local t="$1"
-  if printf '%s' "$t" | grep -qE "$RE_RATING";      then printf '%s' "$GLYPH_RATE";    return; fi
-  if printf '%s' "$t" | grep -qE "$RE_APPROVE_MENU"; then printf '%s' "$GLYPH_APPROVE"; return; fi
-  if printf '%s' "$t" | grep -qE "$RE_INPUT";        then printf '%s' "$GLYPH_INPUT";   return; fi
+  if printf '%s' "$t" | grep -qE "$RE_RATING";      then echo RATING;  return; fi
+  if printf '%s' "$t" | grep -qE "$RE_APPROVE_MENU"; then echo APPROVE; return; fi
+  if printf '%s' "$t" | grep -qE "$RE_INPUT";        then echo INPUT;   return; fi
   if printf '%s' "$t" | grep -qE  "$RE_RUN_TIMER" \
-  || printf '%s' "$t" | grep -qiE "$RE_RUN_INTR";   then printf '%s' "$GLYPH_RUN";     return; fi
-  if printf '%s' "$t" | grep -qE "$RE_PROMPT";       then printf '%s' "$GLYPH_IDLE";    return; fi
-  printf '%s' "$GLYPH_UNKNOWN"
+  || printf '%s' "$t" | grep -qiE "$RE_RUN_INTR";   then echo RUNNING; return; fi
+  if printf '%s' "$t" | grep -qE "$RE_PROMPT";       then echo IDLE;    return; fi
+  echo UNKNOWN
+}
+
+# state -> "rank glyph". Rank orders the list by how much it wants YOUR attention
+# (1 = top): approvals, then input blocks, then running, then idle, then the
+# optional rating, then unknown. Edit to taste.
+state_meta() {
+  case "$1" in
+    APPROVE) echo "1 $GLYPH_APPROVE" ;;
+    INPUT)   echo "2 $GLYPH_INPUT"   ;;
+    RUNNING) echo "3 $GLYPH_RUN"     ;;
+    IDLE)    echo "4 $GLYPH_IDLE"    ;;
+    RATING)  echo "5 $GLYPH_RATE"    ;;
+    *)       echo "6 $GLYPH_UNKNOWN" ;;
+  esac
 }
 
 # One row per pane whose foreground command is `claude`. An exited CC (shell now
@@ -60,7 +74,8 @@ while IFS="$TAB" read -r pid cmd swin title; do
   txt="$(tmux capture-pane -p -t "$pid" 2>/dev/null | tail -n "$TAIL_LINES")" || continue
   [ -n "$txt" ] || continue
 
-  glyph="$(classify "$txt")"
+  meta="$(state_meta "$(classify "$txt")")"   # "rank glyph", e.g. "1 [!]"
+  rank="${meta%% *}"; glyph="${meta#* }"      # split without word-splitting (glyphs are glob chars)
 
   # Prefer the on-screen question (a line ending in ?); fall back to the CC
   # conversation topic (pane_title). Strip tabs so the TSV stays well-formed.
@@ -69,5 +84,8 @@ while IFS="$TAB" read -r pid cmd swin title; do
   [ -n "$q" ] || q="$title"
 
   title="$(printf '%s' "$title" | tr -d "$TAB")"
-  printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$glyph" "$swin" "$title" "$q"
-done | sort -t"$TAB" -k1,1   # deterministic order => fzf cursor index stays put across refreshes
+  # Leading rank column drives the sort, then is stripped so field 1 stays pane_id.
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rank" "$pid" "$glyph" "$swin" "$title" "$q"
+done | sort -t"$TAB" -k1,1n -k2,2 | cut -f2-
+# ^ sort by importance rank (numeric), pane_id as a stable within-tier tiebreaker,
+#   then drop the rank column. Most-actionable sessions land at the top.
