@@ -14,5 +14,5 @@ existing="$(tmux list-windows -a -F '#{window_name} #{session_name}:#{window_ind
 if [ -n "$existing" ]; then
   tmux switch-client -t "$existing"      # session:index -> focuses that window even across sessions
 else
-  tmux new-window -n orchbus "$DIR/orchbus.sh"
+  tmux new-window -n orchbus "$DIR/orchbus.sh --fresh"
 fi
