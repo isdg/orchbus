@@ -11,10 +11,16 @@ Pure tmux: it *reads* panes with `capture-pane` and *acts* on them with
 
 ## Install
 
-Add one line to `~/.tmux.conf` (this repo already wires it in):
+Via [TPM](https://github.com/tmux-plugins/tpm), add to `~/.tmux.conf`:
 
 ```tmux
-run-shell '~/.dotfiles/tmux/orchbus/orchbus.tmux'
+set -g @plugin 'isdf/orchbus'
+```
+
+Then `prefix + I` to fetch it. Or add it directly:
+
+```tmux
+run-shell '~/.tmux/plugins/orchbus/orchbus.tmux'
 ```
 
 Reload: `tmux source-file ~/.tmux.conf`. Requires **fzf ≥ 0.36** (`start`/`load`

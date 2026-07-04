@@ -7,8 +7,10 @@
 #     prefix o  -> as a display-popup (ephemeral overlay)
 #     prefix O  -> as a real tmux window (persists, shows in the window list)
 #
-# Load it from ~/.tmux.conf with:
-#     run-shell '~/.dotfiles/tmux/orchbus/orchbus.tmux'
+# Install via TPM (~/.tmux.conf):
+#     set -g @plugin 'isdf/orchbus'
+# or load directly:
+#     run-shell '~/.tmux/plugins/orchbus/orchbus.tmux'
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 tmux bind-key o display-popup -E -w 100% -h 100% "$CURRENT_DIR/scripts/orchbus.sh"
