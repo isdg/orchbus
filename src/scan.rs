@@ -2,8 +2,8 @@
 //! a single-pane rescan (after approve/cancel) updates instantly without
 //! re-scanning every pane.
 //!
-//! Cache row (7 fields): rank <TAB> pane_id <TAB> agent <TAB> glyph <TAB> session:win <TAB> topic <TAB> question
-//! List row  (6 fields): pane_id <TAB> agent <TAB> glyph <TAB> session:win <TAB> topic <TAB> question
+//! Cache row (7 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> topic <TAB> question
+//! List row  (6 fields): pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> topic <TAB> question
 //!
 //! pane_id (e.g. %23) is the sole tmux target the UI uses; fields 2.. are display
 //! only (the UI hides field 1 from fzf matching with --with-nth=2..). `agent` is
@@ -39,13 +39,13 @@ impl Row {
     fn cache_line(&self) -> String {
         format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            self.rank, self.pid, self.agent, self.glyph, self.swin, self.title, self.question
+            self.rank, self.pid, self.glyph, self.agent, self.swin, self.title, self.question
         )
     }
     fn list_line(&self) -> String {
         format!(
             "{}\t{}\t{}\t{}\t{}\t{}",
-            self.pid, self.agent, self.glyph, self.swin, self.title, self.question
+            self.pid, self.glyph, self.agent, self.swin, self.title, self.question
         )
     }
     fn from_cache_line(line: &str) -> Option<Row> {
@@ -56,8 +56,8 @@ impl Row {
         Some(Row {
             rank: f[0].parse().unwrap_or(6),
             pid: f[1].into(),
-            agent: f[2].into(),
-            glyph: f[3].into(),
+            glyph: f[2].into(),
+            agent: f[3].into(),
             swin: f[4].into(),
             title: f[5].into(),
             question: f[6].into(),
@@ -229,7 +229,7 @@ mod tests {
         assert_eq!(back.pid, "%3");
         assert_eq!(back.agent, "CC");
         assert_eq!(back.question, "proceed?");
-        assert_eq!(r.list_line(), "%3\tCC\t[!]\ts:1\ttopic\tproceed?");
+        assert_eq!(r.list_line(), "%3\t[!]\tCC\ts:1\ttopic\tproceed?");
     }
 
     #[test]
