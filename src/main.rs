@@ -10,6 +10,7 @@
 //!
 //! The scan classifier and the approve guard share one PATTERN TABLE (classify).
 
+mod agent;
 mod classify;
 mod scan;
 mod tmux;
