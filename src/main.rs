@@ -14,6 +14,7 @@ mod agent;
 mod classify;
 mod format;
 mod scan;
+mod target;
 mod tmux;
 mod ui;
 
@@ -55,12 +56,16 @@ enum Cmd {
     },
     /// Approve the highlighted menu on PANE, only if it's still showing.
     Approve {
+        /// %pane_id, session:window, or window name.
         pane: String,
         /// `enter` (accept default) or a digit 1-9 (pick that option).
         key: String,
     },
     /// Cancel a pane's prompt (send Escape).
-    Cancel { pane: String },
+    Cancel {
+        /// %pane_id, session:window, or window name.
+        pane: String,
+    },
     /// Run the fzf cockpit.
     Ui {
         /// Full scan on init (the persistent window) vs cached (the popup).
@@ -102,8 +107,11 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Cmd::Approve { pane, key } => approve(&pane, &key)?,
-        Cmd::Cancel { pane } => tmux::run(["send-keys", "-t", &pane, "Escape"])?,
+        Cmd::Approve { pane, key } => approve(&target::resolve(&pane)?, &key)?,
+        Cmd::Cancel { pane } => {
+            let pane = target::resolve(&pane)?;
+            tmux::run(["send-keys", "-t", &pane, "Escape"])?
+        }
         Cmd::Ui { fresh } => ui::run(fresh)?,
         Cmd::Open => ui::open()?,
     }
