@@ -18,7 +18,7 @@ mod target;
 mod tmux;
 mod ui;
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -56,15 +56,27 @@ enum Cmd {
     },
     /// Approve the highlighted menu on PANE, only if it's still showing.
     Approve {
-        /// %pane_id, session:window, or window name.
-        pane: String,
-        /// `enter` (accept default) or a digit 1-9 (pick that option).
-        key: String,
+        /// %pane_id, session:window, or window name (omit with --all).
+        pane: Option<String>,
+        /// `enter` (accept default) or a digit 1-9 (ignored with --all).
+        key: Option<String>,
+        /// Approve every pane showing an approval menu (accepts each default).
+        #[arg(long)]
+        all: bool,
+        /// Skip the confirmation prompt (required for --all without a TTY).
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Cancel a pane's prompt (send Escape).
     Cancel {
-        /// %pane_id, session:window, or window name.
-        pane: String,
+        /// %pane_id, session:window, or window name (omit with --all).
+        pane: Option<String>,
+        /// Cancel every pane showing an approval menu.
+        #[arg(long)]
+        all: bool,
+        /// Skip the confirmation prompt (required for --all without a TTY).
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Run the fzf cockpit.
     Ui {
@@ -107,15 +119,59 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Cmd::Approve { pane, key } => approve(&target::resolve(&pane)?, &key)?,
-        Cmd::Cancel { pane } => {
-            let pane = target::resolve(&pane)?;
-            tmux::run(["send-keys", "-t", &pane, "Escape"])?
+        Cmd::Approve { pane, key, all, yes } => {
+            if all {
+                let targets = scan::approvable(&scan::collect(false, None)?);
+                if confirm("approve", targets.len(), yes)? {
+                    for p in &targets {
+                        approve(p, "enter")?;
+                    }
+                }
+            } else {
+                let pane = pane.context("approve needs a PANE (or --all)")?;
+                let key = key.context("approve needs a key: enter or 1-9 (or --all)")?;
+                approve(&target::resolve(&pane)?, &key)?;
+            }
+        }
+        Cmd::Cancel { pane, all, yes } => {
+            if all {
+                let targets = scan::approvable(&scan::collect(false, None)?);
+                if confirm("cancel", targets.len(), yes)? {
+                    for p in &targets {
+                        tmux::run(["send-keys", "-t", p, "Escape"])?;
+                    }
+                }
+            } else {
+                let pane = target::resolve(&pane.context("cancel needs a PANE (or --all)")?)?;
+                tmux::run(["send-keys", "-t", &pane, "Escape"])?;
+            }
         }
         Cmd::Ui { fresh } => ui::run(fresh)?,
         Cmd::Open => ui::open()?,
     }
     Ok(())
+}
+
+/// Gate a bulk `--all` action behind a confirmation: no-op message when there's
+/// nothing to do, straight through with `--yes`, an interactive `[y/N]` prompt on
+/// a TTY, and a hard error when neither (so scripts must opt in with `--yes`).
+fn confirm(action: &str, n: usize, yes: bool) -> Result<bool> {
+    use std::io::{IsTerminal, Write};
+    if n == 0 {
+        println!("nothing to {action}");
+        return Ok(false);
+    }
+    if yes {
+        return Ok(true);
+    }
+    if !std::io::stdin().is_terminal() {
+        bail!("refusing to {action} {n} pane(s) without --yes (no TTY to confirm)");
+    }
+    print!("{action} {n} pane(s)? [y/N] ");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    Ok(matches!(line.trim(), "y" | "Y" | "yes"))
 }
 
 /// Re-capture PANE and send the key ONLY if the approve menu (❯ N.) is still

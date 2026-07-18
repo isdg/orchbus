@@ -90,6 +90,15 @@ pub fn dispatch(cache: bool, pane: Option<String>) -> Result<String> {
     Ok(format_list(&collect(cache, pane)?))
 }
 
+/// Pane ids of rows currently showing an approval menu — the `approve/cancel
+/// --all` bulk target. Pure over the rows so the selection is unit-testable.
+pub(crate) fn approvable(rows: &[Row]) -> Vec<String> {
+    rows.iter()
+        .filter(|r| r.state() == State::Approve)
+        .map(|r| r.pid.clone())
+        .collect()
+}
+
 fn format_list(rows: &[Row]) -> String {
     rows.iter().map(Row::list_line).collect::<Vec<_>>().join("\n")
 }
@@ -247,5 +256,21 @@ mod tests {
     fn last_lines_takes_tail() {
         assert_eq!(last_lines("a\nb\nc\nd", 2), "c\nd");
         assert_eq!(last_lines("only", 25), "only");
+    }
+
+    #[test]
+    fn approvable_selects_only_approve_state() {
+        let mk = |rank: u8, pid: &str| Row {
+            rank,
+            pid: pid.into(),
+            agent: "CC".into(),
+            glyph: String::new(),
+            swin: "s:1".into(),
+            title: String::new(),
+            question: String::new(),
+        };
+        // rank 1 == Approve; everything else is excluded.
+        let rows = vec![mk(1, "%1"), mk(3, "%2"), mk(1, "%3"), mk(2, "%4")];
+        assert_eq!(approvable(&rows), vec!["%1", "%3"]);
     }
 }
