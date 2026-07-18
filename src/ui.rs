@@ -52,6 +52,11 @@ pub fn run(fresh: bool) -> Result<()> {
 /// Open the cockpit as a real tmux window, reusing an existing `orchbus` window
 /// (in any session) instead of spawning a duplicate.
 pub fn open() -> Result<()> {
+    if std::env::var_os("TMUX").is_none() {
+        println!("no tmux");
+        return Ok(());
+    }
+
     let existing = tmux::query([
         "list-windows",
         "-a",
