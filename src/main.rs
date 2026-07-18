@@ -12,6 +12,7 @@
 
 mod agent;
 mod classify;
+mod format;
 mod scan;
 mod tmux;
 mod ui;
@@ -33,8 +34,24 @@ enum Cmd {
         /// Print the last cached list instantly, without scanning.
         #[arg(long)]
         cache: bool,
+        /// Emit a JSON array instead of the fzf TSV list.
+        #[arg(long)]
+        json: bool,
         /// Rescan only this pane and splice it into the cached list.
         pane: Option<String>,
+    },
+    /// List Claude Code panes as a human-readable table.
+    #[command(alias = "ls")]
+    List {
+        /// Emit a JSON array instead of the table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize pane states in one line; exits non-zero if any need approval.
+    Status {
+        /// Emit a JSON object instead of the one-liner.
+        #[arg(long)]
+        json: bool,
     },
     /// Approve the highlighted menu on PANE, only if it's still showing.
     Approve {
@@ -56,10 +73,33 @@ enum Cmd {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Scan { cache, pane } => {
-            let out = scan::dispatch(cache, pane)?;
+        Cmd::Scan { cache, json, pane } => {
+            let out = if json {
+                format::json_rows(&scan::collect(cache, pane)?)
+            } else {
+                scan::dispatch(cache, pane)?
+            };
             if !out.is_empty() {
                 println!("{out}");
+            }
+        }
+        Cmd::List { json } => {
+            let rows = scan::collect(false, None)?;
+            let out = if json { format::json_rows(&rows) } else { format::human(&rows) };
+            if !out.is_empty() {
+                println!("{out}");
+            }
+        }
+        Cmd::Status { json } => {
+            let rows = scan::collect(false, None)?;
+            let out = if json { format::status_json(&rows) } else { format::status(&rows) };
+            println!("{out}");
+            // Non-zero exit when a pane is blocked on approval, so `status` slots
+            // into shell conditionals. Flush first — process::exit skips buffers.
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            if format::any_waiting(&rows) {
+                std::process::exit(1);
             }
         }
         Cmd::Approve { pane, key } => approve(&pane, &key)?,

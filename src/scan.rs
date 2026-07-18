@@ -11,7 +11,7 @@
 //! legible as we scale beyond Claude Code.
 
 use crate::agent;
-use crate::classify::{classify, meta};
+use crate::classify::{classify, meta, state_from_rank, State};
 use crate::tmux;
 use anyhow::{Context, Result};
 
@@ -25,17 +25,22 @@ fn cache_path() -> String {
     format!("{}/orchbus.cache", tmp.trim_end_matches('/'))
 }
 
-struct Row {
-    rank: u8,
-    pid: String,
-    agent: String,
-    glyph: String,
-    swin: String,
-    title: String,
-    question: String,
+pub(crate) struct Row {
+    pub(crate) rank: u8,
+    pub(crate) pid: String,
+    pub(crate) agent: String,
+    pub(crate) glyph: String,
+    pub(crate) swin: String,
+    pub(crate) title: String,
+    pub(crate) question: String,
 }
 
 impl Row {
+    /// The classifier state this row carries, recovered from its cached rank.
+    pub(crate) fn state(&self) -> State {
+        state_from_rank(self.rank)
+    }
+
     fn cache_line(&self) -> String {
         format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -65,18 +70,28 @@ impl Row {
     }
 }
 
-/// Dispatch matching scan.sh:
-///   dispatch(true, _)         -> print the cached list instantly (no scan)
-///   dispatch(false, None)     -> full scan of every CC pane
-///   dispatch(false, Some(id)) -> rescan only that pane, splice into the cache
-pub fn dispatch(cache: bool, pane: Option<String>) -> Result<String> {
+/// Gather the sorted rows for one of the three scan modes — the single scan path
+/// that every formatter (fzf TSV, human table, JSON, status) is built on:
+///   collect(true, _)         -> the cached rows instantly (no scan)
+///   collect(false, None)     -> full scan of every CC pane
+///   collect(false, Some(id)) -> rescan only that pane, splice into the cache
+pub(crate) fn collect(cache: bool, pane: Option<String>) -> Result<Vec<Row>> {
     if cache {
-        return Ok(read_cache_list());
+        return Ok(read_cache_rows());
     }
     match pane {
         Some(p) => splice(&p),
         None => full(),
     }
+}
+
+/// The fzf list format (6-field TSV, rank column dropped) for the given rows.
+pub fn dispatch(cache: bool, pane: Option<String>) -> Result<String> {
+    Ok(format_list(&collect(cache, pane)?))
+}
+
+fn format_list(rows: &[Row]) -> String {
+    rows.iter().map(Row::list_line).collect::<Vec<_>>().join("\n")
 }
 
 /// Last N lines of `s`, rejoined.
@@ -128,7 +143,7 @@ fn list_panes() -> Result<String> {
 }
 
 /// Scan every agent pane across all sessions.
-fn full() -> Result<String> {
+fn full() -> Result<Vec<Row>> {
     let panes = list_panes()?;
     let rows: Vec<Row> = panes
         .lines()
@@ -147,7 +162,7 @@ fn full() -> Result<String> {
 
 /// Rescan only `pid`, splicing its fresh row into the cached list (falls back to
 /// a full scan if there's no cache yet).
-fn splice(pid: &str) -> Result<String> {
+fn splice(pid: &str) -> Result<Vec<Row>> {
     let cache = match std::fs::read_to_string(cache_path()) {
         Ok(c) => c,
         Err(_) => return full(),
@@ -175,9 +190,9 @@ fn splice(pid: &str) -> Result<String> {
     Ok(finalize(rows))
 }
 
-/// Sort by importance (rank, then pane_id), cache atomically (WITH rank so a
-/// later splice can re-sort), and return the rank-stripped 5-field list.
-fn finalize(mut rows: Vec<Row>) -> String {
+/// Sort by importance (rank, then pane_id) and cache atomically (WITH rank so a
+/// later splice can re-sort), returning the sorted rows for a formatter to render.
+fn finalize(mut rows: Vec<Row>) -> Vec<Row> {
     rows.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.pid.cmp(&b.pid)));
 
     let cache_body = rows
@@ -187,7 +202,7 @@ fn finalize(mut rows: Vec<Row>) -> String {
         .join("\n");
     write_cache_atomic(&cache_body);
 
-    rows.iter().map(Row::list_line).collect::<Vec<_>>().join("\n")
+    rows
 }
 
 fn write_cache_atomic(body: &str) {
@@ -199,14 +214,10 @@ fn write_cache_atomic(body: &str) {
     }
 }
 
-fn read_cache_list() -> String {
+fn read_cache_rows() -> Vec<Row> {
     match std::fs::read_to_string(cache_path()) {
-        Ok(c) => c
-            .lines()
-            .filter_map(|l| l.splitn(2, '\t').nth(1)) // drop the rank column
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Err(_) => String::new(),
+        Ok(c) => c.lines().filter_map(Row::from_cache_line).collect(),
+        Err(_) => Vec::new(),
     }
 }
 

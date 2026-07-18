@@ -87,6 +87,31 @@ pub fn shows_approve_menu(text: &str) -> bool {
     APPROVE_MENU.is_match(text)
 }
 
+/// Lowercase word for a state — the human/JSON label (the glyph's plain-text twin).
+pub fn label(state: State) -> &'static str {
+    match state {
+        State::Approve => "approve",
+        State::Input => "input",
+        State::Running => "running",
+        State::Idle => "idle",
+        State::Rating => "rating",
+        State::Unknown => "unknown",
+    }
+}
+
+/// Inverse of `meta`'s rank: recover the state from a cached rank so a `Row` read
+/// back from the cache (which stores rank, not the enum) can report its state.
+pub fn state_from_rank(rank: u8) -> State {
+    match rank {
+        1 => State::Approve,
+        2 => State::Input,
+        3 => State::Running,
+        4 => State::Idle,
+        5 => State::Rating,
+        _ => State::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
