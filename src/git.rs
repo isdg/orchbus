@@ -36,6 +36,38 @@ pub fn head() -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// The change a worktree has made since `base`: tracked diff vs the working tree,
+/// plus a trailing list of new untracked files (which a plain `diff` omits).
+pub fn diff(worktree: &std::path::Path, base: &str) -> Result<String> {
+    let tracked = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["diff", base, "--"])
+        .output()
+        .context("failed to run git diff")?;
+    if !tracked.status.success() {
+        bail!("git diff {base} failed in {}", worktree.display());
+    }
+    let mut out = String::from_utf8_lossy(&tracked.stdout).into_owned();
+
+    let untracked = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .output()
+        .context("failed to list untracked files")?;
+    let list = String::from_utf8_lossy(&untracked.stdout);
+    if !list.trim().is_empty() {
+        out.push_str("\n# untracked (new) files:\n");
+        for f in list.lines() {
+            out.push_str("#   ");
+            out.push_str(f);
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
 /// `git worktree add -b <branch> <path> <base>` — a fresh branch in its own tree.
 pub fn add_worktree(path: &std::path::Path, branch: &str, base: &str) -> Result<()> {
     let status = Command::new("git")

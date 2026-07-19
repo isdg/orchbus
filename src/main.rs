@@ -20,10 +20,10 @@ mod tmux;
 mod ui;
 mod git;
 mod plan;
-// Some store/registry helpers are consumed by later verbs (review/revise/fork).
+mod review;
+// Some store/registry helpers are consumed by later verbs (revise/fork).
 #[allow(dead_code)]
 mod state;
-#[allow(dead_code)]
 mod tags;
 
 use anyhow::{bail, Context, Result};
@@ -113,6 +113,14 @@ enum Cmd {
         /// The spawn slug (see `orchbus list` / state.json).
         slug: String,
     },
+    /// Review a spawned agent's diff (or plan) with a fresh headless agent.
+    Review {
+        /// The spawn slug.
+        slug: String,
+        /// Review the plan itself (pre-implement gate) instead of the diff.
+        #[arg(long)]
+        plan: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -195,6 +203,7 @@ fn main() -> Result<()> {
             let path = plan::capture(&slug)?;
             println!("captured plan → {}", path.display());
         }
+        Cmd::Review { slug, plan } => review::run(&slug, plan)?,
     }
     Ok(())
 }

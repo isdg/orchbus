@@ -8,6 +8,11 @@
 //! they're *detected* (the tag column stays legible in a mixed fleet), but their
 //! argv builder is not wired yet. Add a kind below to teach orchbus a new agent.
 
+use anyhow::{bail, Context, Result};
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Stdio};
+
 /// What the caller wants an agent invocation to do. Only the fields relevant to a
 /// given verb are set (e.g. `spawn` sets `session_id`+`prompt`; `fork` sets
 /// `resume`+`fork`). See `Agent::argv`.
@@ -117,6 +122,31 @@ fn claude_argv(o: &Launch) -> Vec<String> {
         push(p);
     }
     a
+}
+
+/// Run a headless agent `argv` in `cwd`, feeding `input` on stdin (so a large diff
+/// isn't crammed onto the command line) and capturing stdout. Used by `review` and
+/// `fork` to drive an agent non-interactively.
+pub fn run_capture(argv: &[String], cwd: &Path, input: &str) -> Result<String> {
+    let (bin, rest) = argv.split_first().context("empty argv")?;
+    let mut child = Command::new(bin)
+        .args(rest)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to spawn {bin}"))?;
+    child
+        .stdin
+        .take()
+        .context("no stdin")?
+        .write_all(input.as_bytes())
+        .context("writing agent stdin")?;
+    let out = child.wait_with_output().context("waiting for agent")?;
+    if !out.status.success() {
+        bail!("{bin} exited with {}", out.status);
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 #[cfg(test)]
