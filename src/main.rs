@@ -19,6 +19,7 @@ mod target;
 mod tmux;
 mod ui;
 mod git;
+mod plan;
 // Some store/registry helpers are consumed by later verbs (review/revise/fork).
 #[allow(dead_code)]
 mod state;
@@ -107,6 +108,11 @@ enum Cmd {
         #[arg(long)]
         no_skip: bool,
     },
+    /// Capture a spawned agent's plan to .orchbus/plans/<slug>.md.
+    Capture {
+        /// The spawn slug (see `orchbus list` / state.json).
+        slug: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -184,6 +190,10 @@ fn main() -> Result<()> {
             tmux::require_inside()?;
             let slug = spawn::run(&prompt, &tag, branch.as_deref(), no_skip)?;
             println!("spawned '{slug}' (tag {tag}) — jump with: orchbus approve {slug} … / list");
+        }
+        Cmd::Capture { slug } => {
+            let path = plan::capture(&slug)?;
+            println!("captured plan → {}", path.display());
         }
     }
     Ok(())
