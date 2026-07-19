@@ -21,7 +21,8 @@ mod ui;
 mod git;
 mod plan;
 mod review;
-// Some store/registry helpers are consumed by later verbs (revise/fork).
+mod revise;
+// state::remove is consumed by fork/reap (B7+).
 #[allow(dead_code)]
 mod state;
 mod tags;
@@ -121,6 +122,11 @@ enum Cmd {
         #[arg(long)]
         plan: bool,
     },
+    /// Send the latest review back to a spawned agent to fix the findings.
+    Revise {
+        /// The spawn slug.
+        slug: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -204,6 +210,10 @@ fn main() -> Result<()> {
             println!("captured plan → {}", path.display());
         }
         Cmd::Review { slug, plan } => review::run(&slug, plan)?,
+        Cmd::Revise { slug } => {
+            tmux::require_inside()?;
+            revise::run(&slug)?
+        }
     }
     Ok(())
 }
