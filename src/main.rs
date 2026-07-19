@@ -17,6 +17,13 @@ mod scan;
 mod target;
 mod tmux;
 mod ui;
+// Track B foundations — consumed by spawn/review/revise/fork (B3+).
+#[allow(dead_code)]
+mod git;
+#[allow(dead_code)]
+mod state;
+#[allow(dead_code)]
+mod tags;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
