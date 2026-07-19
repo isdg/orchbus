@@ -68,6 +68,18 @@ pub fn diff(worktree: &std::path::Path, base: &str) -> Result<String> {
     Ok(out)
 }
 
+/// Resolve any revision spec (branch, tag, sha) to a full commit sha.
+pub fn rev_parse(spec: &str) -> Result<String> {
+    let out = Command::new("git")
+        .args(["rev-parse", spec])
+        .output()
+        .context("failed to run git rev-parse")?;
+    if !out.status.success() {
+        bail!("git rev-parse {spec} failed");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 /// `git worktree add -b <branch> <path> <base>` — a fresh branch in its own tree.
 pub fn add_worktree(path: &std::path::Path, branch: &str, base: &str) -> Result<()> {
     let status = Command::new("git")

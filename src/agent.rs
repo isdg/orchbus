@@ -149,6 +149,28 @@ pub fn run_capture(argv: &[String], cwd: &Path, input: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Pull `(result_text, session_id)` out of a `-p --output-format json` envelope.
+/// Claude emits an array of events whose final `type == "result"` element holds
+/// the text + session id; a bare object is also accepted. Used by `review`/`fork`.
+pub fn parse_result(stdout: &str) -> Result<(String, Option<String>)> {
+    let v: serde_json::Value =
+        serde_json::from_str(stdout.trim()).context("parsing agent -p json output")?;
+    let obj = match &v {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .rev()
+            .find(|e| {
+                e.get("type").and_then(|t| t.as_str()) == Some("result") || e.get("result").is_some()
+            })
+            .cloned()
+            .context("no result event in agent -p output")?,
+        other => other.clone(),
+    };
+    let result = obj.get("result").and_then(|r| r.as_str()).unwrap_or("").to_string();
+    let session_id = obj.get("session_id").and_then(|s| s.as_str()).map(String::from);
+    Ok((result, session_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +283,26 @@ mod tests {
     #[test]
     fn undriveable_agents_return_none() {
         assert!(for_command("codex").unwrap().argv(&Launch::default()).is_none());
+    }
+
+    #[test]
+    fn parse_result_reads_event_array() {
+        // Real `claude -p --output-format json` shape: an array of events whose
+        // final `type:"result"` element carries result + session_id.
+        let json = r#"[
+            {"type":"system","subtype":"init"},
+            {"type":"assistant","session_id":"sid-9"},
+            {"type":"result","subtype":"success","result":"<review>- [spec] a.rs: off</review>","session_id":"sid-9"}
+        ]"#;
+        let (result, sid) = parse_result(json).unwrap();
+        assert!(result.contains("off"));
+        assert_eq!(sid.as_deref(), Some("sid-9"));
+    }
+
+    #[test]
+    fn parse_result_accepts_bare_object() {
+        let (result, sid) = parse_result(r#"{"result":"clean","session_id":"sid-1"}"#).unwrap();
+        assert_eq!(result, "clean");
+        assert_eq!(sid.as_deref(), Some("sid-1"));
     }
 }

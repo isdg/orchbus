@@ -97,7 +97,7 @@ fn slugify(text: &str) -> String {
 }
 
 /// Ensure the slug doesn't collide with an existing one by suffixing `-2`, `-3`, …
-fn unique_slug(base: &str, existing: &BTreeSet<String>) -> String {
+pub(crate) fn unique_slug(base: &str, existing: &BTreeSet<String>) -> String {
     if !existing.contains(base) {
         return base.to_string();
     }

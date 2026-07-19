@@ -18,11 +18,12 @@ mod spawn;
 mod target;
 mod tmux;
 mod ui;
+mod fork;
 mod git;
 mod plan;
 mod review;
 mod revise;
-// state::remove is consumed by fork/reap (B7+).
+// state::remove is consumed by reap (deferred).
 #[allow(dead_code)]
 mod state;
 mod tags;
@@ -127,6 +128,17 @@ enum Cmd {
         /// The spawn slug.
         slug: String,
     },
+    /// Fork a spawned agent's session into a new divergent worktree.
+    Fork {
+        /// The parent spawn slug.
+        slug: String,
+        /// Role for the fork (default: inherit the parent's tag).
+        #[arg(long)]
+        tag: Option<String>,
+        /// First instruction for the interactive fork pane.
+        #[arg(long)]
+        prompt: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -213,6 +225,10 @@ fn main() -> Result<()> {
         Cmd::Revise { slug } => {
             tmux::require_inside()?;
             revise::run(&slug)?
+        }
+        Cmd::Fork { slug, tag, prompt } => {
+            tmux::require_inside()?;
+            fork::run(&slug, tag.as_deref(), prompt.as_deref())?
         }
     }
     Ok(())

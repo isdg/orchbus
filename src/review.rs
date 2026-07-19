@@ -37,7 +37,7 @@ pub fn run(slug: &str, plan_only: bool) -> Result<()> {
         .with_context(|| format!("orchbus can't drive agent '{}' yet", tag.agent))?;
 
     let stdout = agent::run_capture(&argv, worktree, &input)?;
-    let (result, session_id) = parse_envelope(&stdout)?;
+    let (result, session_id) = agent::parse_result(&stdout)?;
     let findings = extract_findings(&result);
 
     let out = write_review(slug, &findings)?;
@@ -65,28 +65,6 @@ fn plan_gate_prompt(plan: &str) -> String {
          complete, correct, and free of risky or ambiguous steps? Report problems per \
          your instructions.\n\nPLAN:\n\n{plan}"
     )
-}
-
-/// Pull `result` + `session_id` out of a `claude -p --output-format json` envelope.
-/// The envelope is an array of events whose final `type == "result"` element holds
-/// the text; we also accept a bare object for forward/backward compatibility.
-fn parse_envelope(stdout: &str) -> Result<(String, Option<String>)> {
-    let v: serde_json::Value =
-        serde_json::from_str(stdout.trim()).context("parsing claude -p json output")?;
-    let obj = match &v {
-        serde_json::Value::Array(items) => items
-            .iter()
-            .rev()
-            .find(|e| {
-                e.get("type").and_then(|t| t.as_str()) == Some("result") || e.get("result").is_some()
-            })
-            .cloned()
-            .context("no result event in claude -p output")?,
-        other => other.clone(),
-    };
-    let result = obj.get("result").and_then(|r| r.as_str()).unwrap_or("").to_string();
-    let session_id = obj.get("session_id").and_then(|s| s.as_str()).map(String::from);
-    Ok((result, session_id))
 }
 
 /// Inner text of the `<review>…</review>` block if present, else the whole result.
@@ -118,28 +96,6 @@ fn write_review(slug: &str, findings: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_envelope_reads_result_event_from_array() {
-        // Real `claude -p --output-format json` shape: an array of events whose
-        // final `type:"result"` element carries result + session_id.
-        let json = r#"[
-            {"type":"system","subtype":"init"},
-            {"type":"assistant","session_id":"sid-9"},
-            {"type":"result","subtype":"success","result":"<review>- [spec] a.rs: off</review>","session_id":"sid-9"}
-        ]"#;
-        let (result, sid) = parse_envelope(json).unwrap();
-        assert!(result.contains("off"));
-        assert_eq!(sid.as_deref(), Some("sid-9"));
-    }
-
-    #[test]
-    fn parse_envelope_accepts_bare_object() {
-        let json = r#"{"result":"clean","session_id":"sid-1"}"#;
-        let (result, sid) = parse_envelope(json).unwrap();
-        assert_eq!(result, "clean");
-        assert_eq!(sid.as_deref(), Some("sid-1"));
-    }
 
     #[test]
     fn extract_findings_unwraps_block() {
