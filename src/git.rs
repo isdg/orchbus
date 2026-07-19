@@ -23,3 +23,32 @@ pub fn root() -> Result<PathBuf> {
 pub fn orchbus_dir() -> Result<PathBuf> {
     Ok(root()?.join(".orchbus"))
 }
+
+/// Full commit sha of `HEAD` — the base a spawned worktree forks from.
+pub fn head() -> Result<String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .context("failed to run git")?;
+    if !out.status.success() {
+        bail!("git rev-parse HEAD failed (no commits yet?)");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// `git worktree add -b <branch> <path> <base>` — a fresh branch in its own tree.
+pub fn add_worktree(path: &std::path::Path, branch: &str, base: &str) -> Result<()> {
+    let status = Command::new("git")
+        .arg("worktree")
+        .arg("add")
+        .arg("-b")
+        .arg(branch)
+        .arg(path)
+        .arg(base)
+        .status()
+        .context("failed to run git worktree add")?;
+    if !status.success() {
+        bail!("git worktree add failed for {}", path.display());
+    }
+    Ok(())
+}

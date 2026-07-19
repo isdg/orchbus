@@ -14,12 +14,12 @@ mod agent;
 mod classify;
 mod format;
 mod scan;
+mod spawn;
 mod target;
 mod tmux;
 mod ui;
-// Track B foundations — consumed by spawn/review/revise/fork (B3+).
-#[allow(dead_code)]
 mod git;
+// Some store/registry helpers are consumed by later verbs (review/revise/fork).
 #[allow(dead_code)]
 mod state;
 #[allow(dead_code)]
@@ -93,6 +93,20 @@ enum Cmd {
     },
     /// Open the cockpit as a reusable tmux window.
     Open,
+    /// Spawn a tagged agent in an isolated git worktree.
+    Spawn {
+        /// The task prompt for the agent.
+        prompt: String,
+        /// Role profile: plan (default), implement, review, or a custom tag.
+        #[arg(long, default_value = "plan")]
+        tag: String,
+        /// Branch name (default: orchbus/<slug>).
+        #[arg(long)]
+        branch: Option<String>,
+        /// Don't pass --dangerously-skip-permissions even though it's isolated.
+        #[arg(long)]
+        no_skip: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -165,6 +179,11 @@ fn main() -> Result<()> {
         Cmd::Open => {
             tmux::require_inside()?;
             ui::open()?
+        }
+        Cmd::Spawn { prompt, tag, branch, no_skip } => {
+            tmux::require_inside()?;
+            let slug = spawn::run(&prompt, &tag, branch.as_deref(), no_skip)?;
+            println!("spawned '{slug}' (tag {tag}) — jump with: orchbus approve {slug} … / list");
         }
     }
     Ok(())
