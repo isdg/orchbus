@@ -1,9 +1,42 @@
 //! Thin wrappers around `tmux` and `fzf`.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::process::{Command, Stdio};
+
+/// Is a tmux *server* running? (server-level — true even when not attached, so a
+/// shell outside tmux can still drive `scan`/`approve`/`cancel`/`list`/`status`
+/// against a live server.) `tmux has-session` exits non-zero when no server runs.
+pub fn server_running() -> bool {
+    Command::new("tmux")
+        .arg("has-session")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Are we *inside* a tmux client? (client-level — `$TMUX` is set only when
+/// attached.) Required by commands that switch the client or open a window.
+pub fn inside() -> bool {
+    std::env::var_os("TMUX").is_some()
+}
+
+/// Guard for commands that read/act on panes: a tmux server must be running.
+pub fn require_server() -> Result<()> {
+    if !server_running() {
+        bail!("no tmux server running (start tmux first)");
+    }
+    Ok(())
+}
+
+/// Guard for commands that switch the client or open a window: must be inside tmux.
+pub fn require_inside() -> Result<()> {
+    if !inside() {
+        bail!("not inside a tmux session (run this from a tmux client)");
+    }
+    Ok(())
+}
 
 /// Run `tmux <args>` and return stdout (lossy UTF-8), trailing newline trimmed.
 pub fn query<I, S>(args: I) -> Result<String>

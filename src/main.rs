@@ -91,6 +91,7 @@ enum Cmd {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Scan { cache, json, pane } => {
+            tmux::require_server()?;
             let out = if json {
                 format::json_rows(&scan::collect(cache, pane)?)
             } else {
@@ -101,6 +102,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::List { json } => {
+            tmux::require_server()?;
             let rows = scan::collect(false, None)?;
             let out = if json { format::json_rows(&rows) } else { format::human(&rows) };
             if !out.is_empty() {
@@ -108,6 +110,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Status { json } => {
+            tmux::require_server()?;
             let rows = scan::collect(false, None)?;
             let out = if json { format::status_json(&rows) } else { format::status(&rows) };
             println!("{out}");
@@ -120,6 +123,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Approve { pane, key, all, yes } => {
+            tmux::require_server()?;
             if all {
                 let targets = scan::approvable(&scan::collect(false, None)?);
                 if confirm("approve", targets.len(), yes)? {
@@ -134,6 +138,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Cancel { pane, all, yes } => {
+            tmux::require_server()?;
             if all {
                 let targets = scan::approvable(&scan::collect(false, None)?);
                 if confirm("cancel", targets.len(), yes)? {
@@ -146,8 +151,14 @@ fn main() -> Result<()> {
                 tmux::run(["send-keys", "-t", &pane, "Escape"])?;
             }
         }
-        Cmd::Ui { fresh } => ui::run(fresh)?,
-        Cmd::Open => ui::open()?,
+        Cmd::Ui { fresh } => {
+            tmux::require_inside()?;
+            ui::run(fresh)?
+        }
+        Cmd::Open => {
+            tmux::require_inside()?;
+            ui::open()?
+        }
     }
     Ok(())
 }
