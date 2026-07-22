@@ -59,8 +59,11 @@ enum Cmd {
         json: bool,
     },
     /// Summarize pane states in one line; exits non-zero if any need approval.
+    /// With a SLUG, report just that spawned agent's state (gone => non-zero).
     Status {
-        /// Emit a JSON object instead of the one-liner.
+        /// A spawn slug: report only that agent's live state instead of the tally.
+        slug: Option<String>,
+        /// Emit JSON instead of the one-liner.
         #[arg(long)]
         json: bool,
     },
@@ -162,17 +165,43 @@ fn main() -> Result<()> {
                 println!("{out}");
             }
         }
-        Cmd::Status { json } => {
+        Cmd::Status { slug, json } => {
             tmux::require_server()?;
-            let rows = scan::collect(false, None)?;
-            let out = if json { format::status_json(&rows) } else { format::status(&rows) };
-            println!("{out}");
-            // Non-zero exit when a pane is blocked on approval, so `status` slots
-            // into shell conditionals. Flush first — process::exit skips buffers.
             use std::io::Write;
-            let _ = std::io::stdout().flush();
-            if format::any_waiting(&rows) {
-                std::process::exit(1);
+            match slug {
+                // Per-slug: report one spawned agent's live state so a driving
+                // session can sequence spawn -> (wait) -> review. `gone` exits
+                // non-zero so scripts can detect a dead/closed pane.
+                Some(slug) => {
+                    state::get(&slug)?; // validate it's a known spawn
+                    let found = scan::window_state(&slug)?;
+                    let (state, pane) = match &found {
+                        Some((pid, st)) => (classify::label(*st), Some(pid.as_str())),
+                        None => ("gone", None),
+                    };
+                    let out = if json {
+                        format::slug_status_json(&slug, state, pane)
+                    } else {
+                        state.to_string()
+                    };
+                    println!("{out}");
+                    let _ = std::io::stdout().flush();
+                    if found.is_none() {
+                        std::process::exit(1);
+                    }
+                }
+                // Fleet tally; non-zero when any pane is blocked on approval, so
+                // `status` slots into shell conditionals. Flush before exit.
+                None => {
+                    let rows = scan::collect(false, None)?;
+                    let out =
+                        if json { format::status_json(&rows) } else { format::status(&rows) };
+                    println!("{out}");
+                    let _ = std::io::stdout().flush();
+                    if format::any_waiting(&rows) {
+                        std::process::exit(1);
+                    }
+                }
             }
         }
         Cmd::Approve { pane, key, all, yes } => {

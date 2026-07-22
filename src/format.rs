@@ -95,6 +95,9 @@ struct RowView<'a> {
     glyph: &'a str,
     agent: &'a str,
     window: &'a str,
+    /// tmux window name — the spawn slug for orchbus-launched agents, so a driving
+    /// session can match a `scan --json` row back to its `spawn`.
+    name: &'a str,
     topic: &'a str,
     question: &'a str,
 }
@@ -109,11 +112,22 @@ pub fn json_rows(rows: &[Row]) -> String {
             glyph: &r.glyph,
             agent: &r.agent,
             window: &r.swin,
+            name: &r.name,
             topic: &r.title,
             question: &r.question,
         })
         .collect();
     serde_json::to_string(&views).unwrap_or_else(|_| "[]".into())
+}
+
+/// One spawned agent's live state as JSON (for `status <slug> --json`):
+/// `{"slug":…,"state":…,"pane":…}`, with `pane` null when the window is gone.
+pub fn slug_status_json(slug: &str, state: &str, pane: Option<&str>) -> String {
+    let mut map = serde_json::Map::new();
+    map.insert("slug".into(), slug.into());
+    map.insert("state".into(), state.into());
+    map.insert("pane".into(), pane.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null));
+    serde_json::Value::Object(map).to_string()
 }
 
 /// The state tally as a JSON object (for `status --json`).
@@ -139,6 +153,7 @@ mod tests {
             agent: "CC".into(),
             glyph: glyph.into(),
             swin: swin.into(),
+            name: "slug".into(),
             title: title.into(),
             question: question.into(),
         }
@@ -184,7 +199,19 @@ mod tests {
         assert!(out.starts_with('['));
         assert!(out.contains(r#""state":"approve""#));
         assert!(out.contains(r#""window":"s:1""#));
+        assert!(out.contains(r#""name":"slug""#));
         assert!(out.contains(r#""question":"proceed?""#));
+    }
+
+    #[test]
+    fn slug_status_json_shape() {
+        let live = slug_status_json("fix-flaky", "idle", Some("%7"));
+        assert!(live.contains(r#""slug":"fix-flaky""#));
+        assert!(live.contains(r#""state":"idle""#));
+        assert!(live.contains(r#""pane":"%7""#));
+        let gone = slug_status_json("fix-flaky", "gone", None);
+        assert!(gone.contains(r#""state":"gone""#));
+        assert!(gone.contains(r#""pane":null"#));
     }
 
     #[test]

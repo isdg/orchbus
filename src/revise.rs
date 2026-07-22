@@ -6,7 +6,7 @@
 //! Fallback: the pane is gone → resume the session in a fresh window, re-passing
 //! `--dangerously-skip-permissions` (⚠️ not restored on resume).
 
-use crate::{agent, git, state, tmux};
+use crate::{agent, git, scan, state, tmux};
 use anyhow::{bail, Context, Result};
 
 pub fn run(slug: &str) -> Result<()> {
@@ -17,7 +17,7 @@ pub fn run(slug: &str) -> Result<()> {
     }
     let instruction = instruction(&review.to_string_lossy());
 
-    match find_pane(slug)? {
+    match scan::pane_for_window(slug)? {
         Some(pane) => {
             // Type the instruction into the live pane and submit it.
             tmux::run(["send-keys", "-t", &pane, "-l", &instruction])?;
@@ -54,21 +54,6 @@ fn instruction(review_path: &str) -> String {
         "A code review flagged issues with your work. Read the review at {review_path} \
          and fix every finding (both spec and correctness), then stop."
     )
-}
-
-/// The live pane for a spawned slug: a pane in the window named `slug` that's
-/// running a known agent, or `None` if the window/pane is gone.
-fn find_pane(slug: &str) -> Result<Option<String>> {
-    let panes = tmux::query([
-        "list-panes",
-        "-a",
-        "-F",
-        "#{pane_id}\t#{window_name}\t#{pane_current_command}",
-    ])?;
-    Ok(panes.lines().find_map(|l| {
-        let f: Vec<&str> = l.splitn(3, '\t').collect();
-        (f.len() == 3 && f[1] == slug && agent::detect(f[2]).is_some()).then(|| f[0].to_string())
-    }))
 }
 
 #[cfg(test)]

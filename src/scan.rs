@@ -2,8 +2,11 @@
 //! a single-pane rescan (after approve/cancel) updates instantly without
 //! re-scanning every pane.
 //!
-//! Cache row (7 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> topic <TAB> question
+//! Cache row (8 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> window_name <TAB> topic <TAB> question
 //! List row  (6 fields): pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> topic <TAB> question
+//!
+//! The list row (what the fzf cockpit consumes) deliberately omits window_name so
+//! its columns are unchanged; window_name rides in the cache + the `--json` view.
 //!
 //! pane_id (e.g. %23) is the sole tmux target the UI uses; fields 2.. are display
 //! only (the UI hides field 1 from fzf matching with --with-nth=2..). `agent` is
@@ -31,6 +34,9 @@ pub(crate) struct Row {
     pub(crate) agent: String,
     pub(crate) glyph: String,
     pub(crate) swin: String,
+    /// tmux window name — equals the spawn slug for orchbus-launched agents, so a
+    /// driving session can map `scan --json` rows back to a `spawn`.
+    pub(crate) name: String,
     pub(crate) title: String,
     pub(crate) question: String,
 }
@@ -43,8 +49,8 @@ impl Row {
 
     fn cache_line(&self) -> String {
         format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            self.rank, self.pid, self.glyph, self.agent, self.swin, self.title, self.question
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            self.rank, self.pid, self.glyph, self.agent, self.swin, self.name, self.title, self.question
         )
     }
     fn list_line(&self) -> String {
@@ -54,8 +60,8 @@ impl Row {
         )
     }
     fn from_cache_line(line: &str) -> Option<Row> {
-        let f: Vec<&str> = line.splitn(7, '\t').collect();
-        if f.len() != 7 {
+        let f: Vec<&str> = line.splitn(8, '\t').collect();
+        if f.len() != 8 {
             return None;
         }
         Some(Row {
@@ -64,8 +70,9 @@ impl Row {
             glyph: f[2].into(),
             agent: f[3].into(),
             swin: f[4].into(),
-            title: f[5].into(),
-            question: f[6].into(),
+            name: f[5].into(),
+            title: f[6].into(),
+            question: f[7].into(),
         })
     }
 }
@@ -112,7 +119,7 @@ fn last_lines(s: &str, n: usize) -> String {
 
 /// Build a row for one pane, or `None` if it isn't a live agent pane worth
 /// showing. `agent` is the already-detected agent tag (e.g. CC).
-fn scan_pane(pid: &str, agent: &str, swin: &str, title: &str) -> Option<Row> {
+fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, title: &str) -> Option<Row> {
     let full = tmux::query(["capture-pane", "-p", "-t", pid]).ok()?;
     let text = last_lines(&full, TAIL_LINES);
     if text.trim().is_empty() {
@@ -135,20 +142,56 @@ fn scan_pane(pid: &str, agent: &str, swin: &str, title: &str) -> Option<Row> {
         agent: agent.into(),
         glyph: glyph.into(),
         swin: swin.into(),
+        name: name.replace('\t', ""),
         title: title.replace('\t', ""),
         question,
     })
 }
 
-/// `pane_id \t command \t session:win \t pane_title` for every pane, all sessions.
+/// `pane_id \t command \t session:win \t window_name \t pane_title` for every pane,
+/// all sessions. `pane_title` stays last — it's the only free-text field, so the
+/// `splitn(5)` parsers can't be tripped by a tab in it.
 fn list_panes() -> Result<String> {
     tmux::query([
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{pane_current_command}\t#{session_name}:#{window_index}\t#{pane_title}",
+        "#{pane_id}\t#{pane_current_command}\t#{session_name}:#{window_index}\t#{window_name}\t#{pane_title}",
     ])
     .context("list-panes failed")
+}
+
+/// The live pane id for a window named `name` running a known agent, or `None` if
+/// the window/pane is gone. Used to resolve a spawn slug (`orchbus status <slug>`,
+/// `revise`) back to its pane without guessing.
+pub(crate) fn pane_for_window(name: &str) -> Result<Option<String>> {
+    let panes = tmux::query([
+        "list-panes",
+        "-a",
+        "-F",
+        "#{pane_id}\t#{window_name}\t#{pane_current_command}",
+    ])?;
+    Ok(pane_for_window_in(&panes, name))
+}
+
+/// Pure core of [`pane_for_window`] over a `list-panes` listing — unit-testable.
+fn pane_for_window_in(listing: &str, name: &str) -> Option<String> {
+    listing.lines().find_map(|l| {
+        let f: Vec<&str> = l.splitn(3, '\t').collect();
+        (f.len() == 3 && f[1] == name && agent::detect(f[2]).is_some()).then(|| f[0].to_string())
+    })
+}
+
+/// The live state of a spawned agent's window (by name), or `None` if it's gone.
+/// The `orchbus status <slug>` / `wait` core: resolve the window, capture its tail,
+/// classify it — reusing the same signals the cockpit does.
+pub(crate) fn window_state(name: &str) -> Result<Option<(String, State)>> {
+    let Some(pid) = pane_for_window(name)? else {
+        return Ok(None);
+    };
+    let full = tmux::query(["capture-pane", "-p", "-t", &pid]).unwrap_or_default();
+    let state = classify(&last_lines(&full, TAIL_LINES));
+    Ok(Some((pid, state)))
 }
 
 /// Scan every agent pane across all sessions.
@@ -157,10 +200,10 @@ fn full() -> Result<Vec<Row>> {
     let rows: Vec<Row> = panes
         .lines()
         .filter_map(|line| {
-            let f: Vec<&str> = line.splitn(4, '\t').collect();
-            if f.len() == 4 {
+            let f: Vec<&str> = line.splitn(5, '\t').collect();
+            if f.len() == 5 {
                 let tag = agent::detect(f[1])?;
-                scan_pane(f[0], tag, f[2], f[3])
+                scan_pane(f[0], tag, f[2], f[3], f[4])
             } else {
                 None
             }
@@ -187,10 +230,10 @@ fn splice(pid: &str) -> Result<Vec<Row>> {
     // Add this pane's fresh row if it's still a live agent pane.
     let panes = list_panes()?;
     if let Some(line) = panes.lines().find(|l| l.starts_with(&format!("{pid}\t"))) {
-        let f: Vec<&str> = line.splitn(4, '\t').collect();
-        if f.len() == 4 {
+        let f: Vec<&str> = line.splitn(5, '\t').collect();
+        if f.len() == 5 {
             if let Some(tag) = agent::detect(f[1]) {
-                if let Some(row) = scan_pane(f[0], tag, f[2], f[3]) {
+                if let Some(row) = scan_pane(f[0], tag, f[2], f[3], f[4]) {
                     rows.push(row);
                 }
             }
@@ -242,14 +285,32 @@ mod tests {
             agent: "CC".into(),
             glyph: "[!]".into(),
             swin: "s:1".into(),
+            name: "fix-flaky".into(),
             title: "topic".into(),
             question: "proceed?".into(),
         };
         let back = Row::from_cache_line(&r.cache_line()).unwrap();
         assert_eq!(back.pid, "%3");
         assert_eq!(back.agent, "CC");
+        assert_eq!(back.name, "fix-flaky");
         assert_eq!(back.question, "proceed?");
+        // list_line (fzf display) still drops rank AND window_name — cockpit columns
+        // are unchanged; the name only rides the cache + JSON.
         assert_eq!(r.list_line(), "%3\t[!]\tCC\ts:1\ttopic\tproceed?");
+    }
+
+    #[test]
+    fn pane_for_window_matches_named_agent_pane_only() {
+        let listing = "\
+%1\tother\tvim
+%2\tfix-flaky\tclaude
+%3\tfix-flaky\tbash
+%4\tbuild\tcodex";
+        // Matches the agent pane in the window named `fix-flaky`, not the bash pane
+        // that shares the name, nor a non-agent (vim) pane.
+        assert_eq!(pane_for_window_in(listing, "fix-flaky"), Some("%2".into()));
+        assert_eq!(pane_for_window_in(listing, "build"), Some("%4".into()));
+        assert_eq!(pane_for_window_in(listing, "missing"), None);
     }
 
     #[test]
@@ -266,6 +327,7 @@ mod tests {
             agent: "CC".into(),
             glyph: String::new(),
             swin: "s:1".into(),
+            name: String::new(),
             title: String::new(),
             question: String::new(),
         };
