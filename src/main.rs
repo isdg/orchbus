@@ -18,6 +18,7 @@ mod spawn;
 mod target;
 mod tmux;
 mod ui;
+mod wait;
 mod fork;
 mod git;
 mod plan;
@@ -112,6 +113,19 @@ enum Cmd {
         /// Don't pass --dangerously-skip-permissions even though it's isolated.
         #[arg(long)]
         no_skip: bool,
+    },
+    /// Block until a spawned agent settles (interactive done / needs attention),
+    /// so a driving session can sequence spawn → wait → review.
+    Wait {
+        /// The spawn slug.
+        slug: String,
+        /// Wait for one specific state (idle|approve|input|rating|running);
+        /// default: return on any settled state.
+        #[arg(long = "for")]
+        target: Option<String>,
+        /// Give up after this many seconds (non-zero exit).
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
     },
     /// Capture a spawned agent's plan to .orchbus/plans/<slug>.md.
     Capture {
@@ -245,6 +259,16 @@ fn main() -> Result<()> {
             tmux::require_inside()?;
             let slug = spawn::run(&prompt, &tag, branch.as_deref(), no_skip)?;
             println!("spawned '{slug}' (tag {tag}) — jump with: orchbus approve {slug} … / list");
+        }
+        Cmd::Wait { slug, target, timeout } => {
+            tmux::require_server()?;
+            let target = match target {
+                Some(ref s) => Some(classify::from_label(s).with_context(|| {
+                    format!("unknown state '{s}' (use idle|approve|input|rating|running)")
+                })?),
+                None => None,
+            };
+            wait::run(&slug, target, timeout)?;
         }
         Cmd::Capture { slug } => {
             let path = plan::capture(&slug)?;

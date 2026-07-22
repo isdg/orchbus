@@ -99,6 +99,20 @@ pub fn label(state: State) -> &'static str {
     }
 }
 
+/// Parse a state label back into a `State` (inverse of `label`) — for CLI flags
+/// like `wait --for approve`. `None` for an unrecognized word.
+pub fn from_label(s: &str) -> Option<State> {
+    Some(match s {
+        "approve" => State::Approve,
+        "input" => State::Input,
+        "running" => State::Running,
+        "idle" => State::Idle,
+        "rating" => State::Rating,
+        "unknown" => State::Unknown,
+        _ => return None,
+    })
+}
+
 /// Inverse of `meta`'s rank: recover the state from a cached rank so a `Row` read
 /// back from the cache (which stores rank, not the enum) can report its state.
 pub fn state_from_rank(rank: u8) -> State {
@@ -147,5 +161,13 @@ mod tests {
     fn input_state() {
         assert_eq!(classify("Interrupted by user"), State::Input);
         assert_eq!(classify("What should Claude do instead?"), State::Input);
+    }
+
+    #[test]
+    fn from_label_round_trips_and_rejects_junk() {
+        for s in [State::Approve, State::Input, State::Running, State::Idle, State::Rating, State::Unknown] {
+            assert_eq!(from_label(label(s)), Some(s));
+        }
+        assert_eq!(from_label("nope"), None);
     }
 }
