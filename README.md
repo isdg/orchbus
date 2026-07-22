@@ -93,6 +93,82 @@ auto-refreshes ~1s, so approve one → the row updates → move to the next.
 - Approve just accepts the highlighted default "Yes"; cancel is a separate key.
 - Every tmux command targets a unique **pane_id** — no session/window guessing.
 
+## Driving the loop — `spawn` / `review` / `fork`
+
+Beyond triage, orchbus can *launch* agents and run them through a
+plan → implement → review → revise loop. Each spawned agent runs in its **own
+git worktree** on a fresh branch and its **own tmux window** — so the work is
+isolated on disk and visible in the cockpit at the same time. Every spawn is
+recorded under a short **slug** in `.orchbus/state.json`, and the later verbs
+find it by that slug.
+
+```sh
+# 1. Spawn a planning agent in an isolated worktree (interactive, plan mode).
+orchbus spawn "add retry with backoff to the http client" --tag plan
+#   → spawned 'add-retry-with-backoff-to-the-http' (tag plan) …
+
+# 2. Once it produces a plan, capture it to .orchbus/plans/<slug>.md.
+orchbus capture add-retry-with-backoff-to-the-http
+
+# 3. (optional) Gate the plan itself with a fresh reviewer before any code.
+orchbus review add-retry-with-backoff-to-the-http --plan
+
+# 4. After the agent implements, review the DIFF against the captured plan.
+#    A brand-new headless `claude -p` reviewer (no prior context, so it can't
+#    rubber-stamp its own reasoning) scores two axes — spec + correctness —
+#    and writes findings to .orchbus/reviews/<slug>.md.
+orchbus review add-retry-with-backoff-to-the-http
+
+# 5. Hand the review back to the same agent to fix the findings.
+orchbus revise add-retry-with-backoff-to-the-http
+
+# 6. Explore a divergent approach without disturbing the original.
+orchbus fork add-retry-with-backoff-to-the-http --prompt "try a token bucket instead"
+```
+
+### Tags (roles)
+
+A **tag** is a named launch profile deciding *how* an agent runs for a step:
+which agent, its `--permission-mode`, an `--append-system-prompt` role, and
+whether it's an interactive pane or headless. Three built-ins cover the loop
+with **no config**:
+
+| Tag | Runs as | Purpose |
+|---|---|---|
+| `plan` | interactive, `--permission-mode plan` | produce a plan (no edits) |
+| `implement` | interactive, `--dangerously-skip-permissions` | do the work (safe — isolated worktree) |
+| `review` | headless `-p`, read-only | spec + correctness reviewer |
+
+Override a built-in or add your own in `.orchbus/agents.toml`:
+
+```toml
+[implement]
+role = "Prefer the smallest diff that satisfies the plan."
+skip_perms = true
+```
+
+Because implement agents live in a throwaway worktree, orchbus can safely pass
+`--dangerously-skip-permissions` — pass `--no-skip` to opt out.
+
+## Claude-driven orchestration
+
+The loop verbs are plain shell commands, so a **Claude Code session can drive
+them itself** (via its Bash tool) — the same plan → implement → review → fork
+loop it would otherwise run with its *native* subagents. The difference is
+**visibility**: native subagents run off-screen, but an `orchbus spawn` opens a
+real tmux window that shows up in the cockpit, so you can watch each sub-agent,
+read its live output, and approve its prompts as it works.
+
+```sh
+orchbus spawn "…subtask…" --tag implement   # visible pane, isolated worktree
+orchbus review <slug>                        # fresh reviewer scores the diff
+orchbus revise <slug>                        # feed findings back in
+```
+
+Tell a driving session to prefer these commands (e.g. via a `CLAUDE.md`
+contract) when you want its orchestration to be watchable and approvable rather
+than hidden.
+
 ## Maintenance
 
 It's screen-scraping, so the CC TUI changing its wording/glyphs can throw off
