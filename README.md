@@ -150,6 +150,32 @@ skip_perms = true
 Because implement agents live in a throwaway worktree, orchbus can safely pass
 `--dangerously-skip-permissions` — pass `--no-skip` to opt out.
 
+### Escape hatch — `orchbus claude`
+
+Tags are deliberately opinionated. When you'd rather drive Claude Code yourself
+with its own flags — but still want the worktree, the tracked slug and a window
+the cockpit can see — use the passthrough:
+
+```sh
+orchbus claude --model opus -p "fix the flaky retry test"
+orchbus claude --slug hotfix -- --agent Explore --effort low
+orchbus claude                    # a plain interactive session, isolated + tracked
+```
+
+Everything after `claude` is forwarded **verbatim**, so the whole Claude Code
+CLI is available. orchbus injects only two flags, and only when your own args
+haven't already spoken for them:
+
+| Injected | Dropped when you pass |
+|---|---|
+| `--session-id <uuid>` (keeps `fork`/`revise` deterministic) | `--resume` / `--continue` / `--session-id` / `--from-pr` |
+| `--dangerously-skip-permissions` (safe — isolated worktree) | `--permission-mode …` / either `*-skip-permissions` flag / `--no-skip` |
+
+Resume a session by id and orchbus records *that* id, so the later verbs still
+find it. orchbus's own flags (`--slug`, `--branch`, `--no-skip`) go before the
+forwarded arguments — add `--` if one would collide with a claude flag. The slug
+defaults to the trailing prompt, or `claude` when there isn't one.
+
 ## Claude-driven orchestration
 
 The loop verbs are plain shell commands, so a **Claude Code session can drive
