@@ -123,7 +123,9 @@ enum Cmd {
     /// one if your args already cover it. Put orchbus's own flags first, then `--`:
     ///
     ///   orchbus claude --slug retry -- --model opus "add retry to the http client"
-    #[command(trailing_var_arg = true)]
+    ///
+    /// Aliased to `c`, the verb you'll actually type: `orchbus c -p "…"`.
+    #[command(alias = "c", trailing_var_arg = true)]
     Claude {
         /// Name for the spawn (default: from the trailing prompt, else `claude`).
         #[arg(long)]
@@ -395,6 +397,16 @@ mod tests {
         assert_eq!(slug, None);
         assert!(!no_skip);
         assert!(args.is_empty());
+    }
+
+    /// `c` is the short spelling — same verb, flags still forwarded untouched.
+    /// (clap matches aliases exactly, so it can't be confused with cancel/capture.)
+    #[test]
+    fn c_is_an_alias_for_claude() {
+        let (slug, _, args) = claude_cmd(&["orchbus", "c", "-p", "go"]);
+        assert_eq!(slug, None);
+        assert_eq!(args, ["-p", "go"]);
+        assert!(Cli::try_parse_from(["orchbus", "c"]).is_ok());
     }
 
     /// orchbus's own flags bind to orchbus, not to the passthrough.

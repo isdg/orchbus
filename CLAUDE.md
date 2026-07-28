@@ -47,10 +47,10 @@ Notes:
   key off the recorded slug in `.orchbus/state.json`).
 - Spawned `implement` agents run with `--dangerously-skip-permissions` because
   they're in a throwaway worktree; pass `spawn --no-skip` to opt out.
-- When a tag doesn't fit, `orchbus claude <claude flags…>` spawns the same way
+- When a tag doesn't fit, `orchbus claude` (alias `c`) spawns the same way
   (worktree + tracked slug + visible window) but forwards your flags verbatim —
-  e.g. `orchbus claude --model opus -p "<subtask>"`. Every verb above still works
-  on the slug it prints.
+  e.g. `orchbus c --model opus -p "<subtask>"`. Every verb above still works on
+  the slug it prints.
 
 ## Working on orchbus itself
 

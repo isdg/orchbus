@@ -150,16 +150,17 @@ skip_perms = true
 Because implement agents live in a throwaway worktree, orchbus can safely pass
 `--dangerously-skip-permissions` — pass `--no-skip` to opt out.
 
-### Escape hatch — `orchbus claude`
+### Escape hatch — `orchbus claude` (`c`)
 
 Tags are deliberately opinionated. When you'd rather drive Claude Code yourself
 with its own flags — but still want the worktree, the tracked slug and a window
-the cockpit can see — use the passthrough:
+the cockpit can see — use the passthrough. It's aliased to **`c`**, so it reads
+about the same as typing `claude`:
 
 ```sh
-orchbus claude --model opus -p "fix the flaky retry test"
-orchbus claude --slug hotfix -- --agent Explore --effort low
-orchbus claude                    # a plain interactive session, isolated + tracked
+orchbus c --model opus -p "fix the flaky retry test"
+orchbus c --slug hotfix -- --agent Explore --effort low
+orchbus c                         # a plain interactive session, isolated + tracked
 ```
 
 Everything after `claude` is forwarded **verbatim**, so the whole Claude Code
