@@ -21,6 +21,7 @@ mod ui;
 mod wait;
 mod fork;
 mod git;
+mod passthru;
 mod plan;
 mod review;
 mod revise;
@@ -113,6 +114,31 @@ enum Cmd {
         /// Don't pass --dangerously-skip-permissions even though it's isolated.
         #[arg(long)]
         no_skip: bool,
+    },
+    /// Run `claude` natively with your own flags, in an isolated worktree.
+    ///
+    /// Everything after `claude` is forwarded verbatim, so the whole Claude Code CLI
+    /// is available (`--model`, `--agent`, `--effort`, `-p`, …). orchbus adds only a
+    /// pinned `--session-id` and `--dangerously-skip-permissions`, and drops either
+    /// one if your args already cover it. Put orchbus's own flags first, then `--`:
+    ///
+    ///   orchbus claude --slug retry -- --model opus "add retry to the http client"
+    ///
+    /// Aliased to `c`, the verb you'll actually type: `orchbus c -p "…"`.
+    #[command(alias = "c", trailing_var_arg = true)]
+    Claude {
+        /// Name for the spawn (default: from the trailing prompt, else `claude`).
+        #[arg(long)]
+        slug: Option<String>,
+        /// Branch name (default: orchbus/<slug>).
+        #[arg(long)]
+        branch: Option<String>,
+        /// Don't inject --dangerously-skip-permissions even though it's isolated.
+        #[arg(long)]
+        no_skip: bool,
+        /// Flags and prompt handed straight to `claude`.
+        #[arg(allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Block until a spawned agent settles (interactive done / needs attention),
     /// so a driving session can sequence spawn → wait → review.
@@ -260,6 +286,11 @@ fn main() -> Result<()> {
             let slug = spawn::run(&prompt, &tag, branch.as_deref(), no_skip)?;
             println!("spawned '{slug}' (tag {tag}) — jump with: orchbus approve {slug} … / list");
         }
+        Cmd::Claude { slug, branch, no_skip, args } => {
+            tmux::require_inside()?;
+            let slug = passthru::run(&args, slug.as_deref(), branch.as_deref(), no_skip)?;
+            println!("spawned '{slug}' (claude passthrough) — jump with: orchbus list / wait {slug}");
+        }
         Cmd::Wait { slug, target, timeout } => {
             tmux::require_server()?;
             let target = match target {
@@ -328,4 +359,61 @@ fn approve(pane: &str, key: &str) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn claude_cmd(argv: &[&str]) -> (Option<String>, bool, Vec<String>) {
+        match Cli::try_parse_from(argv).expect("should parse").cmd {
+            Cmd::Claude { slug, no_skip, args, .. } => (slug, no_skip, args),
+            other => panic!("expected Cmd::Claude, got {:?}", std::mem::discriminant(&other)),
+        }
+    }
+
+    /// `--` separates orchbus's flags from claude's — the documented spelling.
+    #[test]
+    fn passthrough_after_double_dash_keeps_claude_flags_intact() {
+        let (slug, no_skip, args) =
+            claude_cmd(&["orchbus", "claude", "--slug", "retry", "--", "--model", "opus", "-p", "go"]);
+        assert_eq!(slug.as_deref(), Some("retry"));
+        assert!(!no_skip);
+        assert_eq!(args, ["--model", "opus", "-p", "go"]);
+    }
+
+    /// …and it also works without `--`, since claude's flags aren't orchbus's.
+    #[test]
+    fn passthrough_without_double_dash_also_collects_flags() {
+        let (slug, _, args) = claude_cmd(&["orchbus", "claude", "--model", "opus", "-p", "go"]);
+        assert_eq!(slug, None);
+        assert_eq!(args, ["--model", "opus", "-p", "go"]);
+    }
+
+    /// A bare `orchbus claude` is valid: a tracked, isolated interactive session.
+    #[test]
+    fn passthrough_accepts_no_args() {
+        let (slug, no_skip, args) = claude_cmd(&["orchbus", "claude"]);
+        assert_eq!(slug, None);
+        assert!(!no_skip);
+        assert!(args.is_empty());
+    }
+
+    /// `c` is the short spelling — same verb, flags still forwarded untouched.
+    /// (clap matches aliases exactly, so it can't be confused with cancel/capture.)
+    #[test]
+    fn c_is_an_alias_for_claude() {
+        let (slug, _, args) = claude_cmd(&["orchbus", "c", "-p", "go"]);
+        assert_eq!(slug, None);
+        assert_eq!(args, ["-p", "go"]);
+        assert!(Cli::try_parse_from(["orchbus", "c"]).is_ok());
+    }
+
+    /// orchbus's own flags bind to orchbus, not to the passthrough.
+    #[test]
+    fn orchbus_flags_are_not_forwarded() {
+        let (_, no_skip, args) = claude_cmd(&["orchbus", "claude", "--no-skip", "--", "-p", "go"]);
+        assert!(no_skip);
+        assert_eq!(args, ["-p", "go"]);
+    }
 }

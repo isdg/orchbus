@@ -12,17 +12,7 @@ use std::collections::BTreeSet;
 
 /// Spawn an agent for `prompt` under role `tag_name`. Returns the assigned slug.
 pub fn run(prompt: &str, tag_name: &str, branch: Option<&str>, no_skip: bool) -> Result<String> {
-    let root = git::root()?; // also asserts we're in a repo
     let tag = tags::resolve(tag_name)?;
-
-    let existing: BTreeSet<String> = state::load()?.into_keys().collect();
-    let slug = unique_slug(&slugify(prompt), &existing);
-    let branch = branch.map(str::to_string).unwrap_or_else(|| format!("orchbus/{slug}"));
-    let worktree = root.join(".orchbus/worktrees").join(&slug);
-    let base = git::head()?;
-
-    // Filesystem isolation via a worktree on a new branch.
-    git::add_worktree(&worktree, &branch, &base)?;
 
     // Pin a session id up front so fork/resume is deterministic (spawned-only).
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -43,6 +33,31 @@ pub fn run(prompt: &str, tag_name: &str, branch: Option<&str>, no_skip: bool) ->
         })
         .with_context(|| format!("orchbus can't drive agent '{}' yet", tag.agent))?;
 
+    open(&slugify(prompt), tag_name, &tag.agent, branch, &session_id, argv)
+}
+
+/// The isolation + bookkeeping half of a spawn, shared by `spawn` and the `claude`
+/// passthrough: take a free slug from `slug_base`, branch a worktree off HEAD, open
+/// a tmux window in it running `argv`, and record the whole thing under the slug.
+/// Returns the slug that was assigned.
+pub(crate) fn open(
+    slug_base: &str,
+    tag: &str,
+    agent_cmd: &str,
+    branch: Option<&str>,
+    session_id: &str,
+    argv: Vec<String>,
+) -> Result<String> {
+    let root = git::root()?; // also asserts we're in a repo
+    let existing: BTreeSet<String> = state::load()?.into_keys().collect();
+    let slug = unique_slug(slug_base, &existing);
+    let branch = branch.map(str::to_string).unwrap_or_else(|| format!("orchbus/{slug}"));
+    let worktree = root.join(".orchbus/worktrees").join(&slug);
+    let base = git::head()?;
+
+    // Filesystem isolation via a worktree on a new branch.
+    git::add_worktree(&worktree, &branch, &base)?;
+
     // Open a tmux window in the worktree running the agent. tmux takes the trailing
     // arguments as the command's argv directly (no shell), so the prompt's spaces
     // need no quoting.
@@ -57,9 +72,9 @@ pub fn run(prompt: &str, tag_name: &str, branch: Option<&str>, no_skip: bool) ->
         worktree: worktree_str,
         branch,
         base,
-        tag: tag_name.to_string(),
-        agent: tag.agent.clone(),
-        session_id,
+        tag: tag.to_string(),
+        agent: agent_cmd.to_string(),
+        session_id: session_id.to_string(),
         review_session_id: None,
     })?;
 
@@ -73,7 +88,7 @@ fn opt(s: &str) -> Option<&str> {
 
 /// A short, filesystem/branch-safe slug from free text: lowercase, non-alnum runs
 /// collapse to a single `-`, trimmed, capped, with a fallback.
-fn slugify(text: &str) -> String {
+pub(crate) fn slugify(text: &str) -> String {
     let mut out = String::new();
     let mut prev_dash = false;
     for ch in text.chars() {

@@ -35,6 +35,11 @@ pub struct Launch<'a> {
     pub role: Option<&'a str>,
     /// Headless run capturing structured JSON (`-p --output-format json`).
     pub headless: bool,
+    /// Raw arguments forwarded verbatim, appended after everything orchbus sets —
+    /// how `orchbus claude` hands the user's own flags (and their prompt) straight
+    /// to the agent. Later flags win for single-value options, so these override
+    /// orchbus's defaults; genuinely conflicting pairs are suppressed by the caller.
+    pub extra: &'a [String],
     /// The user prompt (trailing positional).
     pub prompt: Option<&'a str>,
 }
@@ -117,6 +122,9 @@ fn claude_argv(o: &Launch) -> Vec<String> {
         push("-p");
         push("--output-format");
         push("json");
+    }
+    for e in o.extra {
+        push(e);
     }
     if let Some(p) = o.prompt {
         push(p);
