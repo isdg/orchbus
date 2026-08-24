@@ -54,12 +54,18 @@ pub fn run(fresh: bool) -> Result<()> {
     // single rule between the input and the preview.
     let args: Vec<String> = vec![
         "--style=minimal".into(),
-        "--layout=reverse-list".into(),
+        // Bottom-up, like nvim's Buffers: the first match sits against the prompt
+        // and the list grows upward, so a short list stays under your cursor
+        // instead of stranding it at the top of an empty pane.
+        "--layout=default".into(),
         "--delimiter=\t".into(),
         "--with-nth=2..".into(),
-        // inline-right, not inline: the counter is pinned to the right edge, so it
-        // holds one column instead of sliding rightward as the query grows.
-        "--info=inline-right".into(),
+        // The counter gets its own line above the prompt, left-aligned and trailed
+        // by a rule: a fixed position that no query length can move, and the rule
+        // doubles as the divider the input needs — which is why --input-border is
+        // gone, it would have drawn a second one.
+        "--info=default".into(),
+        "--separator=─".into(),
         "--no-scrollbar".into(),
         "--pointer=›".into(),
         "--marker= ".into(),
@@ -67,9 +73,6 @@ pub fn run(fresh: bool) -> Result<()> {
         // only mark in the list is the pointer on the row you are actually on.
         "--gutter= ".into(),
         "--prompt=› ".into(),
-        // A rule between the list and the input, so the thing you type into is
-        // visually its own row rather than the last line of the results.
-        "--input-border=line".into(),
         format!("--header={}", header()),
         "--preview=tmux capture-pane -ep -t {1} | tail -n \"${FZF_PREVIEW_LINES:-40}\"".into(),
         "--preview-window=down,60%,border-top".into(),
