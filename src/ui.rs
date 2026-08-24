@@ -65,6 +65,9 @@ pub fn run(fresh: bool) -> Result<()> {
         // only mark in the list is the pointer on the row you are actually on.
         "--gutter= ".into(),
         "--prompt=› ".into(),
+        // A rule between the list and the input, so the thing you type into is
+        // visually its own row rather than the last line of the results.
+        "--input-border=line".into(),
         format!("--header={}", header()),
         "--preview=tmux capture-pane -ep -t {1} | tail -n \"${FZF_PREVIEW_LINES:-40}\"".into(),
         "--preview-window=down,60%,border-top".into(),
