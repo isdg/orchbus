@@ -343,15 +343,48 @@ fn here() -> String {
         .unwrap_or_default()
 }
 
-/// Order rows for display. Pure over `mode`/`here` so both orders test without a
-/// tmux server or a real working directory.
-pub(crate) fn order(rows: &mut [Row], mode: Sort, here: &str) {
+/// The tmux session the cockpit was opened from — the second ring of "near me".
+fn here_session() -> String {
+    tmux::query(["display-message", "-p", "#{session_name}"])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// The session half of a row's `session:window`.
+fn session_of(swin: &str) -> &str {
+    swin.split(':').next().unwrap_or(swin)
+}
+
+/// Order rows for display. Pure over `mode`/`here`/`here_session` so both orders
+/// test without a tmux server or a real working directory.
+///
+/// `Sort::Dir` sorts in widening rings around where you are: the panes in this
+/// directory, then the rest of this tmux session, then everyone else by
+/// directory. Two panes can share a directory without sharing a session (a
+/// worktree opened twice) and share a session without sharing a directory (a
+/// session whose windows wandered), so neither key subsumes the other — and
+/// "near me" means the directory first, since that is what the work is.
+pub(crate) fn order(rows: &mut [Row], mode: Sort, here: &str, here_session: &str) {
     match mode {
         Sort::Rank => rows.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.pid.cmp(&b.pid))),
-        // `cwd != here` is false (0) for the current directory, so it sorts first;
-        // the rest fall alphabetically, and rank still decides inside a group.
+        // Each `!=` is false (0) for a match, so matches sort first. An empty
+        // `here`/`here_session` never equals a real value, which degrades to plain
+        // alphabetical rather than privileging an arbitrary group.
         Sort::Dir => rows.sort_by(|a, b| {
-            (a.cwd != here, &a.cwd, a.rank, &a.pid).cmp(&(b.cwd != here, &b.cwd, b.rank, &b.pid))
+            (
+                a.cwd != here,
+                session_of(&a.swin) != here_session,
+                &a.cwd,
+                a.rank,
+                &a.pid,
+            )
+                .cmp(&(
+                    b.cwd != here,
+                    session_of(&b.swin) != here_session,
+                    &b.cwd,
+                    b.rank,
+                    &b.pid,
+                ))
         }),
     }
 }
@@ -359,7 +392,7 @@ pub(crate) fn order(rows: &mut [Row], mode: Sort, here: &str) {
 /// Order the rows for the active view and cache atomically (WITH rank so a later
 /// splice can re-sort), returning them for a formatter to render.
 fn finalize(mut rows: Vec<Row>) -> Vec<Row> {
-    order(&mut rows, sort_mode(), &here());
+    order(&mut rows, sort_mode(), &here(), &here_session());
 
     let cache_body = rows
         .iter()
@@ -479,7 +512,7 @@ mod tests {
     #[test]
     fn rank_sort_ignores_directories() {
         let mut rows = vec![drow(4, "%2", "~/a"), drow(1, "%9", "~/z"), drow(1, "%3", "~/a")];
-        order(&mut rows, Sort::Rank, "~/z");
+        order(&mut rows, Sort::Rank, "~/z", "");
         let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
         assert_eq!(got, vec!["%3", "%9", "%2"], "rank then pane_id");
     }
@@ -493,16 +526,48 @@ mod tests {
             drow(1, "%4", "~/here"),
             drow(1, "%5", "~/b"),
         ];
-        order(&mut rows, Sort::Dir, "~/here");
+        order(&mut rows, Sort::Dir, "~/here", "");
         let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
         // ~/here first (rank inside it), then the rest alphabetically
         assert_eq!(got, vec!["%4", "%3", "%2", "%1", "%5"]);
     }
 
+    fn srow(rank: u8, pid: &str, cwd: &str, swin: &str) -> Row {
+        let mut r = drow(rank, pid, cwd);
+        r.swin = swin.into();
+        r
+    }
+
+    #[test]
+    fn dir_sort_rings_outward_dir_then_session_then_the_rest() {
+        let mut rows = vec![
+            srow(1, "%1", "~/other", "far:1"),      // neither
+            srow(1, "%2", "~/other", "here-sess:2"), // same session, different dir
+            srow(4, "%3", "~/here", "far:3"),        // same dir, other session
+            srow(1, "%4", "~/here", "here-sess:4"),  // both
+        ];
+        order(&mut rows, Sort::Dir, "~/here", "here-sess");
+        let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
+        // dir wins first (both %4/%3, rank inside), then the session ring (%2),
+        // then everything else.
+        assert_eq!(got, vec!["%4", "%3", "%2", "%1"]);
+    }
+
+    #[test]
+    fn session_ring_does_not_outrank_the_directory() {
+        // A pane sharing only the session must never beat one sharing the dir.
+        let mut rows = vec![
+            srow(1, "%same-session", "~/zzz", "here-sess:1"),
+            srow(6, "%same-dir", "~/here", "far:1"),
+        ];
+        order(&mut rows, Sort::Dir, "~/here", "here-sess");
+        assert_eq!(rows[0].pid, "%same-dir", "directory is the stronger ring");
+    }
+
     #[test]
     fn dir_sort_without_a_current_dir_is_plain_alphabetical() {
         let mut rows = vec![drow(1, "%1", "~/z"), drow(1, "%2", "~/a")];
-        order(&mut rows, Sort::Dir, "");
+        order(&mut rows, Sort::Dir, "", "");
         let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
         assert_eq!(got, vec!["%2", "%1"]);
     }
