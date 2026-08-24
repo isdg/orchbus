@@ -72,9 +72,9 @@ pub fn run(fresh: bool) -> Result<()> {
         "--no-scrollbar".into(),
         "--pointer=›".into(),
         "--marker= ".into(),
-        // fzf 0.70 paints a '▌' gutter down every non-current row; blank it so the
-        // only mark in the list is the pointer on the row you are actually on.
-        "--gutter= ".into(),
+        // The gutter keeps fzf's default '▌' on every non-current row, so a rule
+        // runs down the left of the list — the same edge nvim's fzf pickers draw
+        // beside their options. The current row swaps it for the pointer.
         "--prompt=› ".into(),
         "--list-border=top".into(),
         "--list-label-pos=2".into(),
