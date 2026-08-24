@@ -16,13 +16,16 @@ fn exe() -> Result<String> {
         .into_owned())
 }
 
-/// The one header line: the active sort mode, then the keys. The mode leads
-/// because it is the only part that changes — `ctrl-g` re-runs this through
-/// fzf's `transform-header`, so the label always matches what you are looking at
-/// instead of naming a fixed action.
+/// The top line: the active sort mode, then the keys. It rides on the list's top
+/// border as a label rather than in `--header`, because fzf anchors the header to
+/// the prompt — in this bottom-up layout that lands it next to the input, and the
+/// help belongs at the top. The mode leads because it is the only part that
+/// changes; `ctrl-g` re-runs this through `transform-list-label` so the label
+/// always names what you are looking at rather than a fixed action.
+/// The outer spaces keep the text off the border glyphs.
 pub fn header() -> String {
     format!(
-        "{} · ctrl-a approve · ctrl-i interrupt · ctrl-x kill pane · ctrl-g sort · enter jump",
+        " {} · ctrl-a approve · ctrl-i interrupt · ctrl-x kill pane · ctrl-g sort · enter jump ",
         scan::sort_label(scan::sort_mode())
     )
 }
@@ -73,7 +76,9 @@ pub fn run(fresh: bool) -> Result<()> {
         // only mark in the list is the pointer on the row you are actually on.
         "--gutter= ".into(),
         "--prompt=› ".into(),
-        format!("--header={}", header()),
+        "--list-border=top".into(),
+        "--list-label-pos=2".into(),
+        format!("--list-label={}", header()),
         "--preview=tmux capture-pane -ep -t {1} | tail -n \"${FZF_PREVIEW_LINES:-40}\"".into(),
         "--preview-window=down,60%,border-top".into(),
         // Self-refresh loop: `load` fires once the list is read, then each
@@ -81,7 +86,7 @@ pub fn run(fresh: bool) -> Result<()> {
         // every ~1s after. Async `reload` (not reload-sync) so input never blocks.
         format!("--bind=load:reload(sleep 1; {scan_all})"),
         format!("--bind=ctrl-r:reload({scan_all})"),
-        format!("--bind=ctrl-g:execute-silent({toggle})+reload({scan_all})+transform-header({exe} header)"),
+        format!("--bind=ctrl-g:execute-silent({toggle})+reload({scan_all})+transform-list-label({exe} header)"),
         format!("--bind=ctrl-a:execute-silent({approve})+reload({scan_one})"),
         format!("--bind=ctrl-i:execute-silent({interrupt})+reload({scan_one})"),
         // Kills the pane outright — no confirm, and the agent in it dies with the
