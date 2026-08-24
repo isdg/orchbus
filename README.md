@@ -105,13 +105,19 @@ importance on every reload. `orchbus sort` prints the current mode;
 | Key | Action |
 |---|---|
 | `ctrl-a` | **approve** — accept the highlighted default "Yes" (safe primary) |
-| `ctrl-x` | **cancel** the prompt (Esc) |
-| `ctrl-g` | **group by directory** (toggle) — current directory first |
+| `ctrl-i` | **interrupt** the agent (Esc) — also fires on `Tab`, see below |
+| `ctrl-x` | **kill the pane** — immediate, no confirm; the agent dies with it |
+| `ctrl-g` | **sort** (toggle) — importance, or by directory with the current one first |
 | `ctrl-r` | refresh now |
 | `enter`  | **jump** to that pane (closes the popup) |
 | type     | fuzzy-filter the list |
 
-The preview pane (right) shows the highlighted session's live contents. The list
+`ctrl-i` and `Tab` are the same keystroke — terminals send `0x09` for both, and
+fzf cannot tell them apart without the kitty keyboard protocol. So `Tab`
+interrupts too; there is no multi-select here for it to collide with.
+
+The layout is nvim's buffer-picker shape: list on top, the input line under it,
+preview below that. The preview shows the highlighted session's live contents. The list
 auto-refreshes ~1s, so approve one → the row updates → move to the next.
 
 ## Safety

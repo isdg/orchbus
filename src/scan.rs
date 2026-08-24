@@ -3,7 +3,7 @@
 //! re-scanning every pane.
 //!
 //! Cache row (9 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> window_name <TAB> dir <TAB> topic <TAB> question
-//! List row  (7 fields): pane_id <TAB> glyph <TAB> dir <TAB> agent <TAB> session:win <TAB> topic <TAB> question
+//! List row  (2 fields): pane_id <TAB> "glyph dir session:win agent question" 
 //!
 //! The list row (what the fzf cockpit consumes) deliberately omits window_name so
 //! its columns stay short; window_name rides in the cache + the `--json` view.
@@ -68,12 +68,19 @@ impl Row {
             self.question
         )
     }
-    /// `dir` sits right after the glyph so the grouping column is the first thing
-    /// the eye lands on, the way the directory heading leads in `claude agents`.
-    fn list_line(&self, dir_w: usize) -> String {
+    /// `pane_id <TAB> display` — exactly one tab. Everything after it is a single
+    /// pre-padded field, because fzf reproduces the row verbatim and renders a
+    /// literal tab at the next 8-column stop, so a multi-tab row cannot be made to
+    /// line up. Padding here makes the columns exact.
+    ///
+    /// `dir` leads after the glyph (the grouping column is what the eye wants
+    /// first, the way the directory heading does in `claude agents`), and `title`
+    /// is gone: `question` already falls back to it, so printing both repeated the
+    /// same text on every row that had no question.
+    fn list_line(&self, dir_w: usize, win_w: usize) -> String {
         format!(
-            "{}\t{}\t{:dir_w$}\t{}\t{}\t{}\t{}",
-            self.pid, self.glyph, self.cwd, self.agent, self.swin, self.title, self.question
+            "{}\t{}  {:dir_w$}  {:win_w$}  {}  {}",
+            self.pid, self.glyph, self.cwd, self.swin, self.agent, self.question
         )
     }
     fn from_cache_line(line: &str) -> Option<Row> {
@@ -169,7 +176,7 @@ pub(crate) fn collect(cache: bool, pane: Option<String>) -> Result<Vec<Row>> {
     }
 }
 
-/// The fzf list format (6-field TSV, rank column dropped) for the given rows.
+/// The fzf list rows: `pane_id <TAB> aligned display` for each.
 pub fn dispatch(cache: bool, pane: Option<String>) -> Result<String> {
     Ok(format_list(&collect(cache, pane)?))
 }
@@ -187,8 +194,9 @@ pub(crate) fn approvable(rows: &[Row]) -> Vec<String> {
 /// renders the row verbatim, so alignment has to be baked in here.
 fn format_list(rows: &[Row]) -> String {
     let dir_w = rows.iter().map(|r| r.cwd.chars().count()).max().unwrap_or(0);
+    let win_w = rows.iter().map(|r| r.swin.chars().count()).max().unwrap_or(0);
     rows.iter()
-        .map(|r| r.list_line(dir_w))
+        .map(|r| r.list_line(dir_w, win_w))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -403,7 +411,7 @@ mod tests {
         assert_eq!(back.question, "proceed?");
         // list_line (fzf display) still drops rank AND window_name — cockpit columns
         // are unchanged; the name only rides the cache + JSON.
-        assert_eq!(r.list_line(0), "%3\t[!]\t~/rc\tCC\ts:1\ttopic\tproceed?");
+        assert_eq!(r.list_line(0, 0), "%3\t[!]  ~/rc  s:1  CC  proceed?");
     }
 
     #[test]
