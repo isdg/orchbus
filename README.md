@@ -28,8 +28,19 @@ events) and tmux 3.2+. The `orchbus` binary is built on first load (background
 `cargo install`, rebuilt when the source is newer — so `prefix U` updates take
 effect); needs **rust/cargo**.
 
-Open the cockpit with `prefix o` (ephemeral popup) or `prefix O` (a real,
-reused tmux window).
+orchbus binds **no keys of its own** — it resolves and builds the binary, and
+the key map stays in your `~/.tmux.conf`, where one file owns every binding and
+a plugin update can never move a key underneath you. Paste this after the TPM
+`run` line and adjust to taste:
+
+```tmux
+run-shell 'ORCHBUS="$(command -v orchbus || echo "$HOME/.cargo/bin/orchbus")"; \
+  tmux bind-key o display-popup -E -w 100% -h 100% "$ORCHBUS ui"; \
+  tmux bind-key O run-shell "$ORCHBUS open"'
+```
+
+That opens the cockpit with `prefix o` (ephemeral popup) or `prefix O` (a real,
+reused tmux window) — the keys this README assumes throughout.
 
 ## Use — `prefix + o`
 
@@ -207,7 +218,7 @@ prose; prefer those when adjusting.
 
 ### Files
 
-- `orchbus.tmux` — entry; resolves/builds the binary, binds `prefix o`/`O`.
+- `orchbus.tmux` — entry; resolves and builds the binary. Binds nothing.
 - `src/main.rs` — CLI: `scan` / `approve` / `cancel` / `ui` / `open`.
 - `src/classify.rs` — the PATTERN TABLE + `classify` / `meta` (shared).
 - `src/scan.rs` — enumerates CC panes, classifies each, emits + caches the rows.
