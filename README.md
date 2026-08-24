@@ -47,12 +47,15 @@ reused tmux window) — the keys this README assumes throughout.
 Opens the cockpit popup. One row per Claude Code pane:
 
 ```
-[!]  stih:1    scribe.yaml refactor    Do you want to make this edit to scribe.yaml?
-[?]  plc:1     plc daily wrapper       Interrupted · What should Claude do instead?
-[*]  skazka:1  image alignment         running
-[=]  oda:1     flowLine node           (waiting)
-[o]  cosmos:2  ...                      How is Claude doing this session? (optional)
+[!]  ~/cosmos-stih    stih:1    scribe.yaml refactor  Do you want to make this edit?
+[?]  ~/plc            plc:1     plc daily wrapper     Interrupted · What instead?
+[*]  ~/cosmos-skazka  skazka:1  image alignment       running
+[=]  ~/cosmos-oda     oda:1     flowLine node         (waiting)
+[o]  ~/cosmos-main    cosmos:2  ...                   How is Claude doing? (optional)
 ```
+
+The second column is the pane's working directory, shown home-relative. It is
+also the grouping key of the directory view below.
 
 | Tag | State | Meaning |
 |---|---|---|
@@ -80,12 +83,30 @@ sink down the list, so the next actionable session rises toward your cursor —
 the intended triage flow. The trade-off is that the highlighted row can shift
 under you on a refresh; sort by `pane_id` alone (a fixed position) if you prefer.
 
+#### Directory view — `ctrl-g`
+
+`ctrl-g` flips between the importance order above and a **directory** order:
+groups sorted by working directory with **the directory you opened the cockpit
+from first**, and the same importance ranking *inside* each group. It is the
+`claude agents` layout — useful when you are looking for a known session rather
+than triaging whatever is loudest.
+
+The cost is real and worth stating: grouping by directory buries an `[!]` inside
+its group, so the loudest pane is no longer guaranteed to be on top. That is why
+importance stays the default and this is a toggle.
+
+The choice persists (a file next to the cache), because the ~1s auto-refresh
+re-runs `scan` as a fresh process — a mode held inside fzf would snap back to
+importance on every reload. `orchbus sort` prints the current mode;
+`orchbus sort --toggle` flips it from a shell.
+
 ### Keys (inside the popup)
 
 | Key | Action |
 |---|---|
 | `ctrl-a` | **approve** — accept the highlighted default "Yes" (safe primary) |
 | `ctrl-x` | **cancel** the prompt (Esc) |
+| `ctrl-g` | **group by directory** (toggle) — current directory first |
 | `ctrl-r` | refresh now |
 | `enter`  | **jump** to that pane (closes the popup) |
 | type     | fuzzy-filter the list |

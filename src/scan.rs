@@ -2,11 +2,15 @@
 //! a single-pane rescan (after approve/cancel) updates instantly without
 //! re-scanning every pane.
 //!
-//! Cache row (8 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> window_name <TAB> topic <TAB> question
-//! List row  (6 fields): pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> topic <TAB> question
+//! Cache row (9 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> window_name <TAB> dir <TAB> topic <TAB> question
+//! List row  (7 fields): pane_id <TAB> glyph <TAB> dir <TAB> agent <TAB> session:win <TAB> topic <TAB> question
 //!
 //! The list row (what the fzf cockpit consumes) deliberately omits window_name so
-//! its columns are unchanged; window_name rides in the cache + the `--json` view.
+//! its columns stay short; window_name rides in the cache + the `--json` view.
+//!
+//! `dir` is the pane's working directory, stored home-relative (`~/cosmos-stih`)
+//! because that is both what it is displayed as and what it is grouped by — a
+//! second, absolute copy would only be a chance for the two to disagree.
 //!
 //! pane_id (e.g. %23) is the sole tmux target the UI uses; fields 2.. are display
 //! only (the UI hides field 1 from fzf matching with --with-nth=2..). `agent` is
@@ -37,6 +41,9 @@ pub(crate) struct Row {
     /// tmux window name — equals the spawn slug for orchbus-launched agents, so a
     /// driving session can map `scan --json` rows back to a `spawn`.
     pub(crate) name: String,
+    /// The pane's working directory, home-relative (`~/cosmos-stih`). The grouping
+    /// key for the directory view, and the displayed column.
+    pub(crate) cwd: String,
     pub(crate) title: String,
     pub(crate) question: String,
 }
@@ -49,19 +56,29 @@ impl Row {
 
     fn cache_line(&self) -> String {
         format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            self.rank, self.pid, self.glyph, self.agent, self.swin, self.name, self.title, self.question
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            self.rank,
+            self.pid,
+            self.glyph,
+            self.agent,
+            self.swin,
+            self.name,
+            self.cwd,
+            self.title,
+            self.question
         )
     }
-    fn list_line(&self) -> String {
+    /// `dir` sits right after the glyph so the grouping column is the first thing
+    /// the eye lands on, the way the directory heading leads in `claude agents`.
+    fn list_line(&self, dir_w: usize) -> String {
         format!(
-            "{}\t{}\t{}\t{}\t{}\t{}",
-            self.pid, self.glyph, self.agent, self.swin, self.title, self.question
+            "{}\t{}\t{:dir_w$}\t{}\t{}\t{}\t{}",
+            self.pid, self.glyph, self.cwd, self.agent, self.swin, self.title, self.question
         )
     }
     fn from_cache_line(line: &str) -> Option<Row> {
-        let f: Vec<&str> = line.splitn(8, '\t').collect();
-        if f.len() != 8 {
+        let f: Vec<&str> = line.splitn(9, '\t').collect();
+        if f.len() != 9 {
             return None;
         }
         Some(Row {
@@ -71,10 +88,70 @@ impl Row {
             agent: f[3].into(),
             swin: f[4].into(),
             name: f[5].into(),
-            title: f[6].into(),
-            question: f[7].into(),
+            cwd: f[6].into(),
+            title: f[7].into(),
+            question: f[8].into(),
         })
     }
+}
+
+/// `$HOME/x` -> `~/x`, `$HOME` -> `~`, anything else unchanged. Pure over `home`
+/// so it tests without touching the environment.
+fn home_relative_in(path: &str, home: &str) -> String {
+    if home.is_empty() {
+        return path.to_string();
+    }
+    if path == home {
+        return "~".into();
+    }
+    match path.strip_prefix(home) {
+        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        _ => path.to_string(),
+    }
+}
+
+fn home_relative(path: &str) -> String {
+    home_relative_in(path, &std::env::var("HOME").unwrap_or_default())
+}
+
+/// Which order the cockpit is showing. Persisted in a file rather than held by
+/// fzf, because the ~1s auto-reload re-runs `scan` as a fresh process — the mode
+/// has to outlive the command that renders it or every refresh would snap back.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Sort {
+    /// Attention first: rank, then pane_id. The triage order.
+    Rank,
+    /// Directory first — the current one leading — then rank inside it.
+    Dir,
+}
+
+fn sort_path() -> String {
+    format!("{}.sort", cache_path())
+}
+
+/// The persisted word for a mode — also what `orchbus sort` prints.
+pub(crate) fn sort_label(mode: Sort) -> &'static str {
+    match mode {
+        Sort::Dir => "dir",
+        Sort::Rank => "rank",
+    }
+}
+
+pub(crate) fn sort_mode() -> Sort {
+    match std::fs::read_to_string(sort_path()).as_deref().map(str::trim) {
+        Ok("dir") => Sort::Dir,
+        _ => Sort::Rank,
+    }
+}
+
+/// Flip the persisted mode and report the new one (for `orchbus sort --toggle`).
+pub(crate) fn toggle_sort() -> Sort {
+    let next = match sort_mode() {
+        Sort::Rank => Sort::Dir,
+        Sort::Dir => Sort::Rank,
+    };
+    let _ = std::fs::write(sort_path(), sort_label(next));
+    next
 }
 
 /// Gather the sorted rows for one of the three scan modes — the single scan path
@@ -106,8 +183,14 @@ pub(crate) fn approvable(rows: &[Row]) -> Vec<String> {
         .collect()
 }
 
+/// Pad the dir column to the widest entry so the columns after it line up; fzf
+/// renders the row verbatim, so alignment has to be baked in here.
 fn format_list(rows: &[Row]) -> String {
-    rows.iter().map(Row::list_line).collect::<Vec<_>>().join("\n")
+    let dir_w = rows.iter().map(|r| r.cwd.chars().count()).max().unwrap_or(0);
+    rows.iter()
+        .map(|r| r.list_line(dir_w))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Last N lines of `s`, rejoined.
@@ -119,7 +202,7 @@ fn last_lines(s: &str, n: usize) -> String {
 
 /// Build a row for one pane, or `None` if it isn't a live agent pane worth
 /// showing. `agent` is the already-detected agent tag (e.g. CC).
-fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, title: &str) -> Option<Row> {
+fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, cwd: &str, title: &str) -> Option<Row> {
     let full = tmux::query(["capture-pane", "-p", "-t", pid]).ok()?;
     let text = last_lines(&full, TAIL_LINES);
     if text.trim().is_empty() {
@@ -143,20 +226,21 @@ fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, title: &str) -> Opt
         glyph: glyph.into(),
         swin: swin.into(),
         name: name.replace('\t', ""),
+        cwd: home_relative(cwd).replace('\t', ""),
         title: title.replace('\t', ""),
         question,
     })
 }
 
-/// `pane_id \t command \t session:win \t window_name \t pane_title` for every pane,
-/// all sessions. `pane_title` stays last — it's the only free-text field, so the
-/// `splitn(5)` parsers can't be tripped by a tab in it.
+/// `pane_id \t command \t session:win \t window_name \t cwd \t pane_title` for every
+/// pane, all sessions. `pane_title` stays last — it's the only free-text field, so
+/// the `splitn(6)` parsers can't be tripped by a tab in it.
 fn list_panes() -> Result<String> {
     tmux::query([
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{pane_current_command}\t#{session_name}:#{window_index}\t#{window_name}\t#{pane_title}",
+        "#{pane_id}\t#{pane_current_command}\t#{session_name}:#{window_index}\t#{window_name}\t#{pane_current_path}\t#{pane_title}",
     ])
     .context("list-panes failed")
 }
@@ -200,10 +284,10 @@ fn full() -> Result<Vec<Row>> {
     let rows: Vec<Row> = panes
         .lines()
         .filter_map(|line| {
-            let f: Vec<&str> = line.splitn(5, '\t').collect();
-            if f.len() == 5 {
+            let f: Vec<&str> = line.splitn(6, '\t').collect();
+            if f.len() == 6 {
                 let tag = agent::detect(f[1])?;
-                scan_pane(f[0], tag, f[2], f[3], f[4])
+                scan_pane(f[0], tag, f[2], f[3], f[4], f[5])
             } else {
                 None
             }
@@ -230,10 +314,10 @@ fn splice(pid: &str) -> Result<Vec<Row>> {
     // Add this pane's fresh row if it's still a live agent pane.
     let panes = list_panes()?;
     if let Some(line) = panes.lines().find(|l| l.starts_with(&format!("{pid}\t"))) {
-        let f: Vec<&str> = line.splitn(5, '\t').collect();
-        if f.len() == 5 {
+        let f: Vec<&str> = line.splitn(6, '\t').collect();
+        if f.len() == 6 {
             if let Some(tag) = agent::detect(f[1]) {
-                if let Some(row) = scan_pane(f[0], tag, f[2], f[3], f[4]) {
+                if let Some(row) = scan_pane(f[0], tag, f[2], f[3], f[4], f[5]) {
                     rows.push(row);
                 }
             }
@@ -242,10 +326,32 @@ fn splice(pid: &str) -> Result<Vec<Row>> {
     Ok(finalize(rows))
 }
 
-/// Sort by importance (rank, then pane_id) and cache atomically (WITH rank so a
-/// later splice can re-sort), returning the sorted rows for a formatter to render.
+/// The directory the cockpit was opened from, home-relative — the group that
+/// leads in `Sort::Dir`. Empty when it can't be resolved, which simply means no
+/// group is privileged.
+fn here() -> String {
+    std::env::current_dir()
+        .map(|p| home_relative(&p.to_string_lossy()))
+        .unwrap_or_default()
+}
+
+/// Order rows for display. Pure over `mode`/`here` so both orders test without a
+/// tmux server or a real working directory.
+pub(crate) fn order(rows: &mut [Row], mode: Sort, here: &str) {
+    match mode {
+        Sort::Rank => rows.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.pid.cmp(&b.pid))),
+        // `cwd != here` is false (0) for the current directory, so it sorts first;
+        // the rest fall alphabetically, and rank still decides inside a group.
+        Sort::Dir => rows.sort_by(|a, b| {
+            (a.cwd != here, &a.cwd, a.rank, &a.pid).cmp(&(b.cwd != here, &b.cwd, b.rank, &b.pid))
+        }),
+    }
+}
+
+/// Order the rows for the active view and cache atomically (WITH rank so a later
+/// splice can re-sort), returning them for a formatter to render.
 fn finalize(mut rows: Vec<Row>) -> Vec<Row> {
-    rows.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.pid.cmp(&b.pid)));
+    order(&mut rows, sort_mode(), &here());
 
     let cache_body = rows
         .iter()
@@ -286,6 +392,7 @@ mod tests {
             glyph: "[!]".into(),
             swin: "s:1".into(),
             name: "fix-flaky".into(),
+            cwd: "~/rc".into(),
             title: "topic".into(),
             question: "proceed?".into(),
         };
@@ -296,7 +403,7 @@ mod tests {
         assert_eq!(back.question, "proceed?");
         // list_line (fzf display) still drops rank AND window_name — cockpit columns
         // are unchanged; the name only rides the cache + JSON.
-        assert_eq!(r.list_line(), "%3\t[!]\tCC\ts:1\ttopic\tproceed?");
+        assert_eq!(r.list_line(0), "%3\t[!]\t~/rc\tCC\ts:1\ttopic\tproceed?");
     }
 
     #[test]
@@ -322,6 +429,7 @@ mod tests {
     #[test]
     fn approvable_selects_only_approve_state() {
         let mk = |rank: u8, pid: &str| Row {
+            cwd: "~/rc".into(),
             rank,
             pid: pid.into(),
             agent: "CC".into(),
@@ -334,5 +442,60 @@ mod tests {
         // rank 1 == Approve; everything else is excluded.
         let rows = vec![mk(1, "%1"), mk(3, "%2"), mk(1, "%3"), mk(2, "%4")];
         assert_eq!(approvable(&rows), vec!["%1", "%3"]);
+    }
+
+    fn drow(rank: u8, pid: &str, cwd: &str) -> Row {
+        Row {
+            rank,
+            pid: pid.into(),
+            agent: "CC".into(),
+            glyph: "[=]".into(),
+            swin: "s:1".into(),
+            name: "n".into(),
+            cwd: cwd.into(),
+            title: "t".into(),
+            question: "q".into(),
+        }
+    }
+
+    #[test]
+    fn home_relative_only_rewrites_a_real_home_prefix() {
+        assert_eq!(home_relative_in("/Users/isg/rc", "/Users/isg"), "~/rc");
+        assert_eq!(home_relative_in("/Users/isg", "/Users/isg"), "~");
+        // a sibling that merely shares the prefix text must not be rewritten
+        assert_eq!(home_relative_in("/Users/isgore/x", "/Users/isg"), "/Users/isgore/x");
+        assert_eq!(home_relative_in("/etc", "/Users/isg"), "/etc");
+        assert_eq!(home_relative_in("/Users/isg/rc", ""), "/Users/isg/rc");
+    }
+
+    #[test]
+    fn rank_sort_ignores_directories() {
+        let mut rows = vec![drow(4, "%2", "~/a"), drow(1, "%9", "~/z"), drow(1, "%3", "~/a")];
+        order(&mut rows, Sort::Rank, "~/z");
+        let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
+        assert_eq!(got, vec!["%3", "%9", "%2"], "rank then pane_id");
+    }
+
+    #[test]
+    fn dir_sort_leads_with_here_then_rank_inside_each_group() {
+        let mut rows = vec![
+            drow(4, "%1", "~/a"),
+            drow(1, "%2", "~/a"),
+            drow(4, "%3", "~/here"),
+            drow(1, "%4", "~/here"),
+            drow(1, "%5", "~/b"),
+        ];
+        order(&mut rows, Sort::Dir, "~/here");
+        let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
+        // ~/here first (rank inside it), then the rest alphabetically
+        assert_eq!(got, vec!["%4", "%3", "%2", "%1", "%5"]);
+    }
+
+    #[test]
+    fn dir_sort_without_a_current_dir_is_plain_alphabetical() {
+        let mut rows = vec![drow(1, "%1", "~/z"), drow(1, "%2", "~/a")];
+        order(&mut rows, Sort::Dir, "");
+        let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
+        assert_eq!(got, vec!["%2", "%1"]);
     }
 }

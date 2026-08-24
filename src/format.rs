@@ -33,15 +33,16 @@ fn color(state: State) -> &'static str {
     }
 }
 
-/// An aligned table: `glyph  session:win  agent  question`. Only the short ASCII
-/// columns (`swin`, `agent`) are padded; `question` runs free at the end (it
-/// already falls back to the pane topic, so no separate topic column is needed).
-/// The glyph is colored when stdout is a terminal.
+/// An aligned table: `glyph  dir  session:win  agent  question`. Only the short
+/// columns (`cwd`, `swin`, `agent`) are padded; `question` runs free at the end
+/// (it already falls back to the pane topic, so no separate topic column is
+/// needed). The glyph is colored when stdout is a terminal.
 pub fn human(rows: &[Row]) -> String {
     human_inner(rows, std::io::stdout().is_terminal())
 }
 
 fn human_inner(rows: &[Row], tty: bool) -> String {
+    let dir_w = rows.iter().map(|r| r.cwd.chars().count()).max().unwrap_or(0);
     let win_w = rows.iter().map(|r| r.swin.len()).max().unwrap_or(0);
     let agent_w = rows.iter().map(|r| r.agent.len()).max().unwrap_or(0);
 
@@ -52,7 +53,10 @@ fn human_inner(rows: &[Row], tty: bool) -> String {
             } else {
                 r.glyph.clone()
             };
-            format!("{glyph}  {:win_w$}  {:agent_w$}  {}", r.swin, r.agent, r.question)
+            format!(
+                "{glyph}  {:dir_w$}  {:win_w$}  {:agent_w$}  {}",
+                r.cwd, r.swin, r.agent, r.question
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -95,6 +99,8 @@ struct RowView<'a> {
     glyph: &'a str,
     agent: &'a str,
     window: &'a str,
+    /// Home-relative working directory — the grouping key of the directory view.
+    dir: &'a str,
     /// tmux window name — the spawn slug for orchbus-launched agents, so a driving
     /// session can match a `scan --json` row back to its `spawn`.
     name: &'a str,
@@ -112,6 +118,7 @@ pub fn json_rows(rows: &[Row]) -> String {
             glyph: &r.glyph,
             agent: &r.agent,
             window: &r.swin,
+            dir: &r.cwd,
             name: &r.name,
             topic: &r.title,
             question: &r.question,
@@ -147,6 +154,10 @@ mod tests {
     use super::*;
 
     fn row(rank: u8, glyph: &str, swin: &str, title: &str, question: &str) -> Row {
+        row_in(rank, glyph, swin, "~/p", title, question)
+    }
+
+    fn row_in(rank: u8, glyph: &str, swin: &str, cwd: &str, title: &str, question: &str) -> Row {
         Row {
             rank,
             pid: "%1".into(),
@@ -154,6 +165,7 @@ mod tests {
             glyph: glyph.into(),
             swin: swin.into(),
             name: "slug".into(),
+            cwd: cwd.into(),
             title: title.into(),
             question: question.into(),
         }
@@ -162,14 +174,14 @@ mod tests {
     #[test]
     fn human_pads_columns_and_omits_color_without_tty() {
         let rows = vec![
-            row(1, "[!]", "s:1", "refactor", "proceed?"),
-            row(4, "[=]", "session:10", "x", "(idle)"),
+            row_in(1, "[!]", "s:1", "~/rc", "refactor", "proceed?"),
+            row_in(4, "[=]", "session:10", "~/cosmos-stih", "x", "(idle)"),
         ];
         let out = human_inner(&rows, false);
         assert!(!out.contains('\x1b'), "no ANSI when not a tty");
-        // both window cells padded to width of "session:10" (10 chars)
-        assert!(out.contains("[!]  s:1         CC  proceed?"));
-        assert!(out.contains("[=]  session:10  CC  (idle)"));
+        // dir cells padded to "~/cosmos-stih" (13), window cells to "session:10" (10)
+        assert!(out.contains("[!]  ~/rc           s:1         CC  proceed?"));
+        assert!(out.contains("[=]  ~/cosmos-stih  session:10  CC  (idle)"));
     }
 
     #[test]

@@ -53,6 +53,14 @@ enum Cmd {
         /// Rescan only this pane and splice it into the cached list.
         pane: Option<String>,
     },
+    /// Show or flip the cockpit's row order: attention rank, or grouped by
+    /// directory with the current one first. The choice persists, so the
+    /// cockpit's ~1s auto-refresh keeps whichever view you picked.
+    Sort {
+        /// Flip to the other order and print the new one.
+        #[arg(long)]
+        toggle: bool,
+    },
     /// List Claude Code panes as a human-readable table.
     #[command(alias = "ls")]
     List {
@@ -196,6 +204,10 @@ fn main() -> Result<()> {
             if !out.is_empty() {
                 println!("{out}");
             }
+        }
+        Cmd::Sort { toggle } => {
+            let mode = if toggle { scan::toggle_sort() } else { scan::sort_mode() };
+            println!("{}", scan::sort_label(mode));
         }
         Cmd::List { json } => {
             tmux::require_server()?;

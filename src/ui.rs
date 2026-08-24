@@ -26,13 +26,17 @@ pub fn run(fresh: bool) -> Result<()> {
     let scan_one = format!("{exe} scan {{1}}"); // {{1}} -> literal {1} for fzf
     let approve = format!("{exe} approve {{1}} enter");
     let cancel = format!("{exe} cancel {{1}}");
+    // ctrl-g flips the persisted sort and reloads. The mode lives in a file, not
+    // in fzf, because the 1s auto-reload runs `scan` as a new process — holding
+    // it here would mean every refresh snapped back to the rank view.
+    let toggle = format!("{exe} sort --toggle");
 
     let args: Vec<String> = vec![
         "--reverse".into(),
         "--delimiter=\t".into(),
         "--with-nth=2..".into(),
         "--prompt=orchbus> ".into(),
-        "--header=ctrl-a approve · ctrl-x cancel · ctrl-r refresh · enter jump".into(),
+        "--header=ctrl-a approve · ctrl-x cancel · ctrl-g group by dir · ctrl-r refresh · enter jump".into(),
         "--preview=tmux capture-pane -ep -t {1} | tail -n \"${FZF_PREVIEW_LINES:-40}\"".into(),
         "--preview-window=down,70%".into(),
         "--preview-label= pane ".into(),
@@ -41,6 +45,7 @@ pub fn run(fresh: bool) -> Result<()> {
         // every ~1s after. Async `reload` (not reload-sync) so input never blocks.
         format!("--bind=load:reload(sleep 1; {scan_all})"),
         format!("--bind=ctrl-r:reload({scan_all})"),
+        format!("--bind=ctrl-g:execute-silent({toggle})+reload({scan_all})"),
         format!("--bind=ctrl-a:execute-silent({approve})+reload({scan_one})"),
         format!("--bind=ctrl-x:execute-silent({cancel})+reload({scan_one})"),
         "--bind=enter:execute-silent(tmux switch-client -t {1}; tmux select-window -t {1}; tmux select-pane -t {1})+abort".into(),
