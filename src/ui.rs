@@ -57,7 +57,9 @@ pub fn run(fresh: bool) -> Result<()> {
         "--layout=reverse-list".into(),
         "--delimiter=\t".into(),
         "--with-nth=2..".into(),
-        "--info=inline".into(),
+        // inline-right, not inline: the counter is pinned to the right edge, so it
+        // holds one column instead of sliding rightward as the query grows.
+        "--info=inline-right".into(),
         "--no-scrollbar".into(),
         "--pointer=›".into(),
         "--marker= ".into(),
