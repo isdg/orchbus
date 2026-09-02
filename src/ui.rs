@@ -55,8 +55,15 @@ pub fn run(fresh: bool) -> Result<()> {
     // plain `default` would read them bottom-up. Everything else is stripped:
     // inline counter instead of its own line, no scrollbar, a bare prompt, and a
     // single rule between the input and the preview.
+    //
+    // No `--style` preset: fzf's built-in default is what nvim's fzf pickers run
+    // with, and it is what colors the `▌` gutter and the pointer. The gutter color
+    // falls back to `bg+`, so the rule down the left of the list follows whatever
+    // the shared fzf theme sets for the current mode; `minimal` resets that
+    // fallback to the terminal's default foreground and paints the same bar in
+    // flat white. The options below strip the preset's scrollbar and marker one at
+    // a time instead, which doesn't touch the colors.
     let args: Vec<String> = vec![
-        "--style=minimal".into(),
         // Bottom-up, like nvim's Buffers: the first match sits against the prompt
         // and the list grows upward, so a short list stays under your cursor
         // instead of stranding it at the top of an empty pane.
@@ -70,11 +77,12 @@ pub fn run(fresh: bool) -> Result<()> {
         "--info=default".into(),
         "--separator=─".into(),
         "--no-scrollbar".into(),
-        "--pointer=›".into(),
         "--marker= ".into(),
         // The gutter keeps fzf's default '▌' on every non-current row, so a rule
         // runs down the left of the list — the same edge nvim's fzf pickers draw
-        // beside their options. The current row swaps it for the pointer.
+        // beside their options. The pointer is left at fzf's default too, so the
+        // current row's mark is themed by the same colors rather than a bare `›`
+        // in the foreground color.
         "--prompt=› ".into(),
         "--list-border=top".into(),
         "--list-label-pos=2".into(),
