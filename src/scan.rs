@@ -70,17 +70,25 @@ impl Row {
     /// literal tab at the next 8-column stop, so a multi-tab row cannot be made to
     /// line up. Padding here makes the columns exact.
     ///
-    /// `dir` leads after the glyph (the grouping column is what the eye wants
-    /// first, the way the directory heading does in `claude agents`).
+    /// Column order: `glyph  dir  agent  topic [· question]  session:win  name`.
+    /// The three that say *what this work is* come first — where it runs, which
+    /// agent runs it, what it is doing — because that is what you read to pick a
+    /// row. The tmux coordinates trail: `session:win` and the window name address
+    /// the pane, which matters once you have already chosen it.
     ///
-    /// `name` sits beside `session:win` because the two name the same window from
-    /// different ends — the index is how tmux addresses it, the name is what it is
-    /// *for* (the spawn slug on orchbus-launched agents, whatever you renamed it to
-    /// otherwise). It is inside the fzf display field, so the slug is searchable.
-    fn list_line(&self, dir_w: usize, win_w: usize, name_w: usize) -> String {
+    /// `name` is last, so it is the one column that runs free; it is also the
+    /// spawn slug on orchbus-launched agents, and it stays inside the fzf display
+    /// field, so typing a slug filters the cockpit to that agent.
+    fn list_line(&self, dir_w: usize, agent_w: usize, tail_w: usize, win_w: usize) -> String {
         format!(
-            "{}\t{}  {:dir_w$}  {:win_w$}  {:name_w$}  {}  {}",
-            self.pid, self.glyph, self.cwd, self.swin, self.name, self.agent, self.tail()
+            "{}\t{}  {:dir_w$}  {:agent_w$}  {:tail_w$}  {:win_w$}  {}",
+            self.pid,
+            self.glyph,
+            self.cwd,
+            self.agent,
+            self.tail(),
+            self.swin,
+            self.name
         )
     }
 
@@ -209,10 +217,11 @@ pub(crate) fn approvable(rows: &[Row]) -> Vec<String> {
 /// renders the row verbatim, so alignment has to be baked in here.
 fn format_list(rows: &[Row]) -> String {
     let dir_w = rows.iter().map(|r| r.cwd.chars().count()).max().unwrap_or(0);
+    let agent_w = rows.iter().map(|r| r.agent.chars().count()).max().unwrap_or(0);
+    let tail_w = rows.iter().map(|r| r.tail().chars().count()).max().unwrap_or(0);
     let win_w = rows.iter().map(|r| r.swin.chars().count()).max().unwrap_or(0);
-    let name_w = rows.iter().map(|r| r.name.chars().count()).max().unwrap_or(0);
     rows.iter()
-        .map(|r| r.list_line(dir_w, win_w, name_w))
+        .map(|r| r.list_line(dir_w, agent_w, tail_w, win_w))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -468,11 +477,11 @@ mod tests {
         assert_eq!(back.agent, "CC");
         assert_eq!(back.name, "fix-flaky");
         assert_eq!(back.question, "proceed?");
-        // list_line (fzf display) drops only rank: the window name is a column now,
-        // and the tail carries the topic with the question appended.
+        // list_line (fzf display) drops only rank: what the work is leads (dir,
+        // agent, topic · question) and the tmux coordinates trail it.
         assert_eq!(
-            r.list_line(0, 0, 0),
-            "%3\t[!]  ~/rc  s:1  fix-flaky  CC  topic · proceed?"
+            r.list_line(0, 0, 0, 0),
+            "%3\t[!]  ~/rc  CC  topic · proceed?  s:1  fix-flaky"
         );
     }
 

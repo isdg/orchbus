@@ -33,18 +33,19 @@ fn color(state: State) -> &'static str {
     }
 }
 
-/// An aligned table: `glyph  dir  session:win  window  agent  topic [· question]`.
-/// Only the short columns (`cwd`, `swin`, `name`, `agent`) are padded; the topic
-/// runs free at the end. The glyph is colored when stdout is a terminal.
+/// The cockpit's table in a shell: `glyph  dir  agent  topic [· question]
+/// session:win  window`. Same column order as the fzf list, so the two views read
+/// alike — what the work is first, the tmux coordinates after. Every column but
+/// the window name is padded; the glyph is colored when stdout is a terminal.
 pub fn human(rows: &[Row]) -> String {
     human_inner(rows, std::io::stdout().is_terminal())
 }
 
 fn human_inner(rows: &[Row], tty: bool) -> String {
     let dir_w = rows.iter().map(|r| r.cwd.chars().count()).max().unwrap_or(0);
+    let agent_w = rows.iter().map(|r| r.agent.chars().count()).max().unwrap_or(0);
+    let tail_w = rows.iter().map(|r| r.tail().chars().count()).max().unwrap_or(0);
     let win_w = rows.iter().map(|r| r.swin.chars().count()).max().unwrap_or(0);
-    let name_w = rows.iter().map(|r| r.name.chars().count()).max().unwrap_or(0);
-    let agent_w = rows.iter().map(|r| r.agent.len()).max().unwrap_or(0);
 
     rows.iter()
         .map(|r| {
@@ -54,12 +55,12 @@ fn human_inner(rows: &[Row], tty: bool) -> String {
                 r.glyph.clone()
             };
             format!(
-                "{glyph}  {:dir_w$}  {:win_w$}  {:name_w$}  {:agent_w$}  {}",
+                "{glyph}  {:dir_w$}  {:agent_w$}  {:tail_w$}  {:win_w$}  {}",
                 r.cwd,
-                r.swin,
-                r.name,
                 r.agent,
-                r.tail()
+                r.tail(),
+                r.swin,
+                r.name
             )
         })
         .collect::<Vec<_>>()
@@ -183,10 +184,11 @@ mod tests {
         ];
         let out = human_inner(&rows, false);
         assert!(!out.contains('\x1b'), "no ANSI when not a tty");
-        // dir cells padded to "~/cosmos-stih" (13), window cells to "session:10" (10);
-        // the topic always shows, the question only when the pane has one.
-        assert!(out.contains("[!]  ~/rc           s:1         slug  CC  refactor · proceed?"));
-        assert!(out.contains("[=]  ~/cosmos-stih  session:10  slug  CC  x"));
+        // dir cells padded to "~/cosmos-stih" (13), topics to "refactor · proceed?"
+        // (19), window cells to "session:10" (10). The topic always shows, the
+        // question only when the pane has one.
+        assert!(out.contains("[!]  ~/rc           CC  refactor · proceed?  s:1         slug"));
+        assert!(out.contains("[=]  ~/cosmos-stih  CC  x                    session:10  slug"));
     }
 
     #[test]
