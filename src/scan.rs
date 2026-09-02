@@ -3,10 +3,7 @@
 //! re-scanning every pane.
 //!
 //! Cache row (9 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> window_name <TAB> dir <TAB> topic <TAB> question
-//! List row  (2 fields): pane_id <TAB> "glyph dir session:win agent question" 
-//!
-//! The list row (what the fzf cockpit consumes) deliberately omits window_name so
-//! its columns stay short; window_name rides in the cache + the `--json` view.
+//! List row  (2 fields): pane_id <TAB> "glyph dir session:win window_name agent topic [· question]"
 //!
 //! `dir` is the pane's working directory, stored home-relative (`~/cosmos-stih`)
 //! because that is both what it is displayed as and what it is grouped by — a
@@ -74,14 +71,32 @@ impl Row {
     /// line up. Padding here makes the columns exact.
     ///
     /// `dir` leads after the glyph (the grouping column is what the eye wants
-    /// first, the way the directory heading does in `claude agents`), and `title`
-    /// is gone: `question` already falls back to it, so printing both repeated the
-    /// same text on every row that had no question.
-    fn list_line(&self, dir_w: usize, win_w: usize) -> String {
+    /// first, the way the directory heading does in `claude agents`).
+    ///
+    /// `name` sits beside `session:win` because the two name the same window from
+    /// different ends — the index is how tmux addresses it, the name is what it is
+    /// *for* (the spawn slug on orchbus-launched agents, whatever you renamed it to
+    /// otherwise). It is inside the fzf display field, so the slug is searchable.
+    fn list_line(&self, dir_w: usize, win_w: usize, name_w: usize) -> String {
         format!(
-            "{}\t{}  {:dir_w$}  {:win_w$}  {}  {}",
-            self.pid, self.glyph, self.cwd, self.swin, self.agent, self.question
+            "{}\t{}  {:dir_w$}  {:win_w$}  {:name_w$}  {}  {}",
+            self.pid, self.glyph, self.cwd, self.swin, self.name, self.agent, self.tail()
         )
+    }
+
+    /// The trailing free-text cell: the pane topic always, and the on-screen
+    /// question after it when there is one. The topic is what the pane is *about*
+    /// and is present on every row, so it holds the column; the question is what
+    /// the pane wants *now* and only exists while something is asking — appending
+    /// it (rather than substituting, as this used to) means a waiting pane no
+    /// longer loses its topic just when you most need to know which work is
+    /// blocked.
+    pub(crate) fn tail(&self) -> String {
+        match (self.title.as_str(), self.question.as_str()) {
+            ("", q) => q.into(),
+            (t, "") => t.into(),
+            (t, q) => format!("{t} · {q}"),
+        }
     }
     fn from_cache_line(line: &str) -> Option<Row> {
         let f: Vec<&str> = line.splitn(9, '\t').collect();
@@ -195,8 +210,9 @@ pub(crate) fn approvable(rows: &[Row]) -> Vec<String> {
 fn format_list(rows: &[Row]) -> String {
     let dir_w = rows.iter().map(|r| r.cwd.chars().count()).max().unwrap_or(0);
     let win_w = rows.iter().map(|r| r.swin.chars().count()).max().unwrap_or(0);
+    let name_w = rows.iter().map(|r| r.name.chars().count()).max().unwrap_or(0);
     rows.iter()
-        .map(|r| r.list_line(dir_w, win_w))
+        .map(|r| r.list_line(dir_w, win_w, name_w))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -208,6 +224,23 @@ fn last_lines(s: &str, n: usize) -> String {
     lines[start..].join("\n")
 }
 
+/// The question a pane is asking *right now* — the first on-screen line ending in
+/// `?`, and only while the pane is actually waiting on you. Empty otherwise.
+///
+/// The state gate is what keeps the tail honest: the last 25 lines of a busy pane
+/// are full of questions it already answered, and since the topic now holds the
+/// column unconditionally, an ungated match would staple stale scrollback onto
+/// every idle row. Whitespace is collapsed and tabs dropped so the TSV stays clean.
+fn live_question(text: &str, state: State) -> String {
+    if !matches!(state, State::Approve | State::Input) {
+        return String::new();
+    }
+    text.lines()
+        .find(|l| l.trim_end().ends_with('?'))
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default()
+}
+
 /// Build a row for one pane, or `None` if it isn't a live agent pane worth
 /// showing. `agent` is the already-detected agent tag (e.g. CC).
 fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, cwd: &str, title: &str) -> Option<Row> {
@@ -216,16 +249,9 @@ fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, cwd: &str, title: &
     if text.trim().is_empty() {
         return None;
     }
-    let (rank, glyph) = meta(classify(&text));
-
-    // Prefer the on-screen question (first line ending in ?); else the CC topic
-    // (pane_title). Collapse whitespace and drop tabs so the TSV stays clean.
-    let question = text
-        .lines()
-        .find(|l| l.trim_end().ends_with('?'))
-        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| title.replace('\t', ""));
+    let state = classify(&text);
+    let (rank, glyph) = meta(state);
+    let question = live_question(&text, state);
 
     Some(Row {
         rank,
@@ -442,9 +468,60 @@ mod tests {
         assert_eq!(back.agent, "CC");
         assert_eq!(back.name, "fix-flaky");
         assert_eq!(back.question, "proceed?");
-        // list_line (fzf display) still drops rank AND window_name — cockpit columns
-        // are unchanged; the name only rides the cache + JSON.
-        assert_eq!(r.list_line(0, 0), "%3\t[!]  ~/rc  s:1  CC  proceed?");
+        // list_line (fzf display) drops only rank: the window name is a column now,
+        // and the tail carries the topic with the question appended.
+        assert_eq!(
+            r.list_line(0, 0, 0),
+            "%3\t[!]  ~/rc  s:1  fix-flaky  CC  topic · proceed?"
+        );
+    }
+
+    #[test]
+    fn cache_survives_an_empty_question() {
+        // The trailing field goes empty on every pane that isn't asking anything,
+        // so the 9-field split has to keep round-tripping with a trailing tab.
+        let r = Row {
+            rank: 3,
+            pid: "%3".into(),
+            agent: "CC".into(),
+            glyph: "[*]".into(),
+            swin: "s:1".into(),
+            name: "w".into(),
+            cwd: "~/rc".into(),
+            title: "topic".into(),
+            question: String::new(),
+        };
+        let back = Row::from_cache_line(&r.cache_line()).unwrap();
+        assert_eq!(back.title, "topic");
+        assert_eq!(back.question, "");
+        assert_eq!(back.rank, 3);
+    }
+
+    #[test]
+    fn live_question_only_when_the_pane_is_waiting_on_you() {
+        let asking = "  ❯ 1. Yes\nDo you want to proceed?";
+        assert_eq!(
+            live_question(asking, State::Approve),
+            "Do you want to proceed?"
+        );
+        assert_eq!(live_question(asking, State::Input), "Do you want to proceed?");
+        // Same text, a state that isn't waiting: scrollback, not a live ask.
+        assert_eq!(live_question(asking, State::Idle), "");
+        assert_eq!(live_question(asking, State::Running), "");
+        // Waiting, but nothing on screen ends in '?'.
+        assert_eq!(live_question("Interrupted by user", State::Input), "");
+    }
+
+    #[test]
+    fn tail_keeps_the_topic_and_appends_a_question_only_when_there_is_one() {
+        let mut r = drow(1, "%1", "~/rc");
+        r.title = "refactor the scanner".into();
+        r.question = String::new();
+        assert_eq!(r.tail(), "refactor the scanner");
+        r.question = "Do you want to proceed?".into();
+        assert_eq!(r.tail(), "refactor the scanner · Do you want to proceed?");
+        r.title = String::new();
+        assert_eq!(r.tail(), "Do you want to proceed?", "no separator with no topic");
     }
 
     #[test]

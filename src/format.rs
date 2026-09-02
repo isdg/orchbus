@@ -33,17 +33,17 @@ fn color(state: State) -> &'static str {
     }
 }
 
-/// An aligned table: `glyph  dir  session:win  agent  question`. Only the short
-/// columns (`cwd`, `swin`, `agent`) are padded; `question` runs free at the end
-/// (it already falls back to the pane topic, so no separate topic column is
-/// needed). The glyph is colored when stdout is a terminal.
+/// An aligned table: `glyph  dir  session:win  window  agent  topic [· question]`.
+/// Only the short columns (`cwd`, `swin`, `name`, `agent`) are padded; the topic
+/// runs free at the end. The glyph is colored when stdout is a terminal.
 pub fn human(rows: &[Row]) -> String {
     human_inner(rows, std::io::stdout().is_terminal())
 }
 
 fn human_inner(rows: &[Row], tty: bool) -> String {
     let dir_w = rows.iter().map(|r| r.cwd.chars().count()).max().unwrap_or(0);
-    let win_w = rows.iter().map(|r| r.swin.len()).max().unwrap_or(0);
+    let win_w = rows.iter().map(|r| r.swin.chars().count()).max().unwrap_or(0);
+    let name_w = rows.iter().map(|r| r.name.chars().count()).max().unwrap_or(0);
     let agent_w = rows.iter().map(|r| r.agent.len()).max().unwrap_or(0);
 
     rows.iter()
@@ -54,8 +54,12 @@ fn human_inner(rows: &[Row], tty: bool) -> String {
                 r.glyph.clone()
             };
             format!(
-                "{glyph}  {:dir_w$}  {:win_w$}  {:agent_w$}  {}",
-                r.cwd, r.swin, r.agent, r.question
+                "{glyph}  {:dir_w$}  {:win_w$}  {:name_w$}  {:agent_w$}  {}",
+                r.cwd,
+                r.swin,
+                r.name,
+                r.agent,
+                r.tail()
             )
         })
         .collect::<Vec<_>>()
@@ -175,13 +179,14 @@ mod tests {
     fn human_pads_columns_and_omits_color_without_tty() {
         let rows = vec![
             row_in(1, "[!]", "s:1", "~/rc", "refactor", "proceed?"),
-            row_in(4, "[=]", "session:10", "~/cosmos-stih", "x", "(idle)"),
+            row_in(4, "[=]", "session:10", "~/cosmos-stih", "x", ""),
         ];
         let out = human_inner(&rows, false);
         assert!(!out.contains('\x1b'), "no ANSI when not a tty");
-        // dir cells padded to "~/cosmos-stih" (13), window cells to "session:10" (10)
-        assert!(out.contains("[!]  ~/rc           s:1         CC  proceed?"));
-        assert!(out.contains("[=]  ~/cosmos-stih  session:10  CC  (idle)"));
+        // dir cells padded to "~/cosmos-stih" (13), window cells to "session:10" (10);
+        // the topic always shows, the question only when the pane has one.
+        assert!(out.contains("[!]  ~/rc           s:1         slug  CC  refactor · proceed?"));
+        assert!(out.contains("[=]  ~/cosmos-stih  session:10  slug  CC  x"));
     }
 
     #[test]
