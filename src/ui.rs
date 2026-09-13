@@ -102,6 +102,10 @@ pub fn run(fresh: bool) -> Result<()> {
         // pane that a splice would rescan no longer exists.
         format!("--bind=ctrl-x:execute-silent(tmux kill-pane -t {{1}})+reload(sleep 0.2; {scan_all})"),
         "--bind=enter:execute-silent(tmux switch-client -t {1}; tmux select-window -t {1}; tmux select-pane -t {1})+abort".into(),
+        // The shared opts file binds M-j to jump mode and chains `jump` to accept.
+        // accept means nothing here — enter runs its own execute-silent and stdout
+        // is ignored — so it would close the cockpit doing nothing. Land, then act.
+        "--bind=jump:ignore".into(),
     ];
 
     tmux::fzf_interactive(&args, init)
