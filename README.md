@@ -76,7 +76,7 @@ float to the top:
 
 Within a tier, rows are ordered by `pane_id` so the list is deterministic across
 the ~1s auto-refresh. The ranking lives in one place — the `meta` function in
-`src/classify.rs` (`Approve => 1 … Unknown => 6`); edit those numbers to reorder.
+`crates/orchbus/src/classify.rs` (`Approve => 1 … Unknown => 6`); edit those numbers to reorder.
 
 Because the list is state-sorted, approving a `[!]` makes it change state and
 sink down the list, so the next actionable session rises toward your cursor —
@@ -127,7 +127,7 @@ auto-refreshes ~1s, so approve one → the row updates → move to the next.
   approval menu is still there** — so a prompt that closed between the scan and
   your keypress never catches a stray keystroke, and rating/interrupted/idle/
   running panes (no `❯ N.` menu) are no-ops. It shares the exact menu pattern
-  with the scanner (both use `src/classify.rs`), so the guard can't drift.
+  with the scanner (both use `crates/orchbus/src/classify.rs`), so the guard can't drift.
 - Approve just accepts the highlighted default "Yes"; cancel is a separate key.
 - Every tmux command targets a unique **pane_id** — no session/window guessing.
 
@@ -237,7 +237,7 @@ than hidden.
 ## Maintenance
 
 It's screen-scraping, so the CC TUI changing its wording/glyphs can throw off
-classification. All the fragile patterns live in **one module, `src/classify.rs`**
+classification. All the fragile patterns live in **one module, `crates/orchbus/src/classify.rs`**
 (the `PATTERN TABLE` — `RATING`, `APPROVE_MENU`, … regexes), used by both the
 scanner and the approve guard. Fix them there. The most robust signals are
 structural (the `❯ N.` menu, the `(Ns ·` elapsed timer) rather than English
@@ -246,11 +246,11 @@ prose; prefer those when adjusting.
 ### Files
 
 - `orchbus.tmux` — entry; resolves and builds the binary. Binds nothing.
-- `src/main.rs` — CLI: `scan` / `approve` / `cancel` / `ui` / `open`.
-- `src/classify.rs` — the PATTERN TABLE + `classify` / `meta` (shared).
-- `src/scan.rs` — enumerates CC panes, classifies each, emits + caches the rows.
-- `src/ui.rs` — the fzf cockpit (binds + auto-refresh loop) and window opener.
-- `src/tmux.rs` — tmux + fzf helpers.
+- `crates/orchbus/src/main.rs` — CLI: `scan` / `approve` / `cancel` / `ui` / `open`.
+- `crates/orchbus/src/classify.rs` — the PATTERN TABLE + `classify` / `meta` (shared).
+- `crates/orchbus/src/scan.rs` — enumerates CC panes, classifies each, emits + caches the rows.
+- `crates/orchbus/src/ui.rs` — the fzf cockpit (binds + auto-refresh loop) and window opener.
+- `crates/orchbus/src/tmux.rs` — tmux + fzf helpers.
 
 ### Possible enhancements
 
