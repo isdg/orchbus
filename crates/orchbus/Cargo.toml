@@ -9,6 +9,7 @@ name = "orchbus"
 path = "src/main.rs"
 
 [dependencies]
+orchbus-agent = { path = "../orchbus-agent" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 regex = "1"

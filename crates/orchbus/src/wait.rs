@@ -7,9 +7,9 @@
 //! window or an elapsed timeout is an error (non-zero exit), so scripts can tell
 //! "the agent is ready" from "it died / never got there".
 
-use crate::classify::{label, State};
 use crate::{scan, state};
 use anyhow::{bail, Result};
+use orchbus_agent::classify::{label, State};
 use std::time::{Duration, Instant};
 
 /// Poll interval — matches the cockpit's ~1s auto-refresh.

@@ -1,0 +1,10 @@
+[package]
+name = "orchbus-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Drive terminal coding agents: detect, classify their screen, build their argv, read their transcripts"
+
+[dependencies]
+anyhow = "1"
+regex = "1"
+serde_json = "1"

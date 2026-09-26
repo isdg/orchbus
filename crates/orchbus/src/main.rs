@@ -10,8 +10,6 @@
 //!
 //! The scan classifier and the approve guard share one PATTERN TABLE (classify).
 
-mod agent;
-mod classify;
 mod format;
 mod scan;
 mod spawn;
@@ -32,6 +30,7 @@ mod tags;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use orchbus_agent::classify;
 
 #[derive(Parser)]
 #[command(name = "orchbus", about = "tmux cockpit for Claude Code sessions")]

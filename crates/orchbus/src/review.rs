@@ -7,8 +7,9 @@
 //! correctness. `--plan` runs the same fresh agent over just the plan, the optional
 //! pre-implement gate. Findings land in `.orchbus/reviews/<slug>.md`.
 
-use crate::{agent, git, plan, state, tags};
+use crate::{git, plan, state, tags};
 use anyhow::{Context, Result};
+use orchbus_agent::agent;
 use std::path::{Path, PathBuf};
 
 /// Review a slug. `plan_only` runs the pre-implement plan gate instead of the diff.

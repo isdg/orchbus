@@ -5,8 +5,8 @@
 //! colored table), `status` (a one-line state tally), and `--json` (both, as
 //! structured data). All are pure `&[Row] -> String` so they unit-test cleanly.
 
-use crate::classify::{self, State};
 use crate::scan::Row;
+use orchbus_agent::classify::{self, State};
 use serde::Serialize;
 use std::io::IsTerminal;
 
