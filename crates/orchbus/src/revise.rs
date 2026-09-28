@@ -6,8 +6,9 @@
 //! Fallback: the pane is gone → resume the session in a fresh window, re-passing
 //! `--dangerously-skip-permissions` (⚠️ not restored on resume).
 
-use crate::{agent, git, scan, state, tmux};
+use crate::{git, scan, state, tmux};
 use anyhow::{bail, Context, Result};
+use orchbus_agent::agent;
 
 pub fn run(slug: &str) -> Result<()> {
     let entry = state::get(slug)?;

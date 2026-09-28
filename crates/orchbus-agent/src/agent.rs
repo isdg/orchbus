@@ -16,8 +16,6 @@ use std::process::{Command, Stdio};
 /// What the caller wants an agent invocation to do. Only the fields relevant to a
 /// given verb are set (e.g. `spawn` sets `session_id`+`prompt`; `fork` sets
 /// `resume`+`fork`). See `Agent::argv`.
-// Consumed by spawn/revise/fork (Track B3+); tested here in the meantime.
-#[allow(dead_code)]
 #[derive(Default)]
 pub struct Launch<'a> {
     /// Pin a new session id (`--session-id`) so we can resume/fork it later.
@@ -56,7 +54,6 @@ pub struct Agent {
     pub tag: &'static str,
     /// The `pane_current_command` this agent runs as.
     pub command: &'static str,
-    #[allow(dead_code)] // read by `argv`, wired from Track B3+
     pub kind: Kind,
 }
 
@@ -80,7 +77,6 @@ pub fn detect(pane_current_command: &str) -> Option<&'static str> {
 impl Agent {
     /// Build the argv to launch/resume this agent. `None` for agents not yet wired
     /// to drive (callers surface a clear "can't drive <agent> yet" error).
-    #[allow(dead_code)] // called by spawn/revise/fork (Track B3+)
     pub fn argv(&self, o: &Launch) -> Option<Vec<String>> {
         match self.kind {
             Kind::Claude => Some(claude_argv(o)),
@@ -92,7 +88,6 @@ impl Agent {
 /// Assemble a `claude` command line from `Launch`. Flag order is stable so it's
 /// unit-testable; `skip_perms` yields to an explicit `permission_mode` (both map
 /// to the same permission knob and Claude rejects the pair).
-#[allow(dead_code)] // reached via Agent::argv from Track B3+
 fn claude_argv(o: &Launch) -> Vec<String> {
     let mut a = vec!["claude".to_string()];
     let mut push = |s: &str| a.push(s.to_string());

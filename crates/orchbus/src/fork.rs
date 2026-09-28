@@ -7,8 +7,9 @@
 //! deterministic — decision: spawned-only, no newest-file guessing), record it,
 //! then open an interactive pane resuming the fork for the user to steer.
 
-use crate::{agent, git, spawn, state, tmux};
+use crate::{git, spawn, state, tmux};
 use anyhow::{Context, Result};
+use orchbus_agent::agent;
 use std::collections::BTreeSet;
 
 /// A benign first turn whose only job is to make `--fork-session` mint a new id we

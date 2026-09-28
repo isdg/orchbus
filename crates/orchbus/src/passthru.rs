@@ -14,8 +14,9 @@
 //!   * `--dangerously-skip-permissions` — safe because the worktree is isolated;
 //!     suppressed by `--no-skip` or by any permission flag of your own.
 
-use crate::{agent, spawn};
+use crate::spawn;
 use anyhow::{Context, Result};
+use orchbus_agent::agent;
 
 /// Flags that mean "I'm managing the session myself" — orchbus must not also pin a
 /// fresh `--session-id` (claude rejects the conflicting pair).

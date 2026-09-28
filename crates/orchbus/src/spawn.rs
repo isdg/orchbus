@@ -6,8 +6,9 @@
 //! `fork` can find it later. Because the agent runs in an isolated worktree, we can
 //! safely pass `--dangerously-skip-permissions` (sandcastle's isolation gate).
 
-use crate::{agent, git, state, tags, tmux};
+use crate::{git, state, tags, tmux};
 use anyhow::{Context, Result};
+use orchbus_agent::agent;
 use std::collections::BTreeSet;
 
 /// Spawn an agent for `prompt` under role `tag_name`. Returns the assigned slug.

@@ -14,10 +14,10 @@
 //! the running-agent tag (e.g. CC = Claude Code) so mixed-agent fleets stay
 //! legible as we scale beyond Claude Code.
 
-use crate::agent;
-use crate::classify::{classify, meta, state_from_rank, State};
 use crate::tmux;
 use anyhow::{Context, Result};
+use orchbus_agent::agent;
+use orchbus_agent::classify::{classify, meta, state_from_rank, State};
 
 const TAIL_LINES: usize = 25;
 
