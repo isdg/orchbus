@@ -1,8 +1,10 @@
 # orchbus contract v0
 
-The interfaces between the three repositories: **orchbus** (Rust: CRD types, operator, CLI, agent
-driver), **orchbus-node** (Go: Virtual Kubelet provider, one per tmux server) and **o6s** (k9s config).
-Anything not written here is private to one repo. Changes bump the version at the top.
+The interfaces between the three repositories: **orchbus** (Rust: CLI, the `orchbus node` helper,
+agent driver), **o5srm** (Go, the orchbus resource model: the `orchbus.io` API types, the operator,
+and `orchbus-node`, the Virtual Kubelet provider run once per tmux server) and **o6s** (k9s config).
+Anything not written here is private to one repo. v0 is a draft and changes in place; the version
+is bumped from v1 on, when a change would break a released side.
 
 ## 1. Cluster access
 
@@ -26,7 +28,9 @@ Written by the operator, read by the node.
 | `orchbus.io/session-id` | session to pin or resume |
 | `orchbus.io/resume` | `"true"` to resume `session-id` instead of starting it |
 | `orchbus.io/mode` | `interactive` (tmux pane) or `headless` (background process, for Jobs) |
+| label `orchbus.io/agent` | `"true"` on every agent pod; what `:ag` in o6s selects |
 | label `orchbus.io/task` | owning Task |
+| `spec.terminationGracePeriodSeconds` | short, e.g. `2`: the node removes a deleted pod only after it |
 
 Written back by the node:
 
