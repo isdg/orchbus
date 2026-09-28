@@ -64,7 +64,20 @@ Non-zero exit means failure, with `{"error": "..."}` on stdout.
 transcript | cost | worktree-ensure | worktree-remove`
 
 `orchbus node version` returns `{"contract": "v0"}`; the node refuses to start on a mismatch.
-Exact request and response shapes are defined with the implementing PR.
+Requests may carry fields a verb does not know; they are ignored.
+
+| Verb | Request | Response |
+|---|---|---|
+| `version` | `{}` | `{"contract": "v0"}` |
+| `spawn` | `{"uid", "session", "name", "cwd", "argv": [..], "env": {..}}` | `{"pane": "%12"}`; the existing pane when `uid` already runs |
+| `kill` | `{"uid"}` | `{"killed": true}`, or `false` when no pane had `uid` |
+| `list-panes` | `{}` | `[{"uid", "pane", "pid", "command"}]`, only panes with `@orchbus_uid`; `[]` when no tmux server runs |
+| `state` | `{"uid"}` | `{"pane", "state", "question"}`; `state` as in §2, `question` empty unless the agent is asking |
+
+`spawn` opens a detached window in `session`, creating the session with the agent as its first
+window when it does not exist, then sets `@orchbus_uid` on the pane. `env` is set in the pane's
+environment, which is how `ORCHBUS_POD_UID` and `ORCHBUS_NODE_SOCK` (§5) reach hooks. A pane whose
+process exits disappears from `list-panes`; the node reports that pod as terminated.
 
 ## 5. Hooks
 
