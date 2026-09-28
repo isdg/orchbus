@@ -7,7 +7,7 @@
 use crate::scan;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
-use orchbus_agent::classify;
+use orchbus_agent::{classify, keys};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -16,6 +16,16 @@ use std::process::{Command, ExitCode};
 
 pub const CONTRACT: &str = "v0";
 const UID_OPTION: &str = "@orchbus_uid";
+/// Exact tmux socket to use instead of the default server; passed as `-S`, which has no fallback.
+const SOCKET_ENV: &str = "ORCHBUS_TMUX_SOCKET";
+
+fn tmux_command() -> Command {
+    let mut c = Command::new("tmux");
+    if let Some(sock) = std::env::var_os(SOCKET_ENV).filter(|s| !s.is_empty()) {
+        c.arg("-S").arg(sock);
+    }
+    c
+}
 
 #[derive(Subcommand, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verb {
@@ -29,6 +39,16 @@ pub enum Verb {
     ListPanes,
     /// The on-screen state of the pane running `uid`.
     State,
+    /// Pick a menu option, only if an approval menu is still showing.
+    Approve,
+    /// Send Escape: dismiss the prompt.
+    Cancel,
+    /// Send Escape: interrupt the running turn.
+    Interrupt,
+    /// Type one line and submit it.
+    Send,
+    /// The pane's screen, with `lines` of scrollback before it.
+    Capture,
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -47,6 +67,27 @@ struct SpawnReq {
 #[derive(Deserialize, Debug, PartialEq)]
 struct UidReq {
     uid: String,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+struct ApproveReq {
+    uid: String,
+    /// 1-based menu option; the highlighted default when absent.
+    #[serde(default)]
+    choice: Option<u8>,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+struct SendReq {
+    uid: String,
+    text: String,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+struct CaptureReq {
+    uid: String,
+    #[serde(default)]
+    lines: u32,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -82,6 +123,13 @@ fn dispatch(verb: Verb, input: &str) -> Result<Value> {
         Verb::Kill => json!({ "killed": kill(&parse::<UidReq>(input)?.uid)? }),
         Verb::ListPanes => serde_json::to_value(list_panes()?)?,
         Verb::State => state(&parse::<UidReq>(input)?.uid)?,
+        Verb::Approve => json!({ "sent": approve(&parse(input)?)? }),
+        Verb::Cancel | Verb::Interrupt => {
+            press(&pane(&parse::<UidReq>(input)?.uid)?, &keys::escape())?;
+            json!({ "sent": true })
+        }
+        Verb::Send => json!({ "sent": send(&parse(input)?)? }),
+        Verb::Capture => json!({ "text": capture(&parse(input)?)? }),
     })
 }
 
@@ -92,7 +140,7 @@ fn parse<T: for<'de> Deserialize<'de>>(input: &str) -> Result<T> {
 /// Run tmux and fail on a non-zero exit, returning trimmed stdout.
 fn tmux<S: AsRef<str>>(args: &[S]) -> Result<String> {
     let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
-    let out = Command::new("tmux").args(&args).output().context("running tmux")?;
+    let out = tmux_command().args(&args).output().context("running tmux")?;
     if !out.status.success() {
         bail!("tmux {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
     }
@@ -106,7 +154,7 @@ fn spawn(r: &SpawnReq) -> Result<String> {
     if let Some(p) = pane_of(&r.uid)? {
         return Ok(p.pane);
     }
-    let has_session = Command::new("tmux")
+    let has_session = tmux_command()
         .args(["has-session", "-t", &format!("={}", r.session)])
         .output()
         .map(|o| o.status.success())
@@ -172,6 +220,54 @@ fn parse_panes(listing: &str) -> Vec<PaneInfo> {
 
 fn pane_of(uid: &str) -> Result<Option<PaneInfo>> {
     Ok(list_panes()?.into_iter().find(|p| p.uid == uid))
+}
+
+fn pane(uid: &str) -> Result<String> {
+    Ok(pane_of(uid)?.with_context(|| format!("no pane for uid {uid}"))?.pane)
+}
+
+fn press(pane: &str, seq: &[keys::Keys]) -> Result<()> {
+    for k in seq {
+        let mut args = vec!["send-keys", "-t", pane];
+        args.extend(k.args());
+        tmux(&args)?;
+    }
+    Ok(())
+}
+
+/// Re-read the screen right before sending, so a menu that closed since the caller looked
+/// never receives a stray keystroke. `false` when there was no menu to answer.
+fn approve(r: &ApproveReq) -> Result<bool> {
+    if r.choice.is_some_and(|c| !(1..=9).contains(&c)) {
+        bail!("choice must be 1-9");
+    }
+    let pane = pane(&r.uid)?;
+    if !classify::shows_approve_menu(&tmux(&["capture-pane", "-p", "-t", &pane])?) {
+        return Ok(false);
+    }
+    press(&pane, &keys::approve(r.choice))?;
+    Ok(true)
+}
+
+fn send(r: &SendReq) -> Result<bool> {
+    if r.text.contains(['\n', '\r']) {
+        bail!("text must be a single line: a newline would submit it early");
+    }
+    if r.text.trim().is_empty() {
+        bail!("text is empty");
+    }
+    press(&pane(&r.uid)?, &keys::send(&r.text))?;
+    Ok(true)
+}
+
+fn capture(r: &CaptureReq) -> Result<String> {
+    let pane = pane(&r.uid)?;
+    let start = format!("-{}", r.lines);
+    let mut args = vec!["capture-pane", "-p", "-t", pane.as_str()];
+    if r.lines > 0 {
+        args.extend(["-S", &start]);
+    }
+    tmux(&args)
 }
 
 fn state(uid: &str) -> Result<Value> {
@@ -241,6 +337,14 @@ mod tests {
     #[test]
     fn version_needs_no_input() {
         assert_eq!(dispatch(Verb::Version, "{}").unwrap(), json!({"contract": "v0"}));
+    }
+
+    #[test]
+    fn action_requests_validate_before_touching_tmux() {
+        assert!(dispatch(Verb::Approve, r#"{"uid":"u","choice":12}"#).unwrap_err().to_string().contains("1-9"));
+        let multi = dispatch(Verb::Send, r#"{"uid":"u","text":"a\nb"}"#).unwrap_err().to_string();
+        assert!(multi.contains("single line"), "{multi}");
+        assert!(dispatch(Verb::Send, r#"{"uid":"u","text":"  "}"#).is_err());
     }
 
     #[test]

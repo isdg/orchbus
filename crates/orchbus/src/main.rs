@@ -31,7 +31,7 @@ mod tags;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use orchbus_agent::classify;
+use orchbus_agent::{classify, keys};
 
 #[derive(Parser)]
 #[command(name = "orchbus", about = "tmux cockpit for Claude Code sessions")]
@@ -371,15 +371,15 @@ fn approve(pane: &str, key: &str) -> Result<()> {
     if !classify::shows_approve_menu(&text) {
         return Ok(()); // menu gone -> no-op
     }
-    match key {
-        "enter" => tmux::run(["send-keys", "-t", pane, "Enter"])?,
-        // Digit pick: send the option number, then confirm with Enter as separate
-        // send-keys calls (tmux flushes between them) to avoid the debounce race.
-        d if d.len() == 1 && matches!(d.chars().next(), Some('1'..='9')) => {
-            tmux::run(["send-keys", "-t", pane, "-l", d])?;
-            tmux::run(["send-keys", "-t", pane, "Enter"])?;
-        }
-        _ => {}
+    let choice = match key {
+        "enter" => None,
+        d if d.len() == 1 && matches!(d.chars().next(), Some('1'..='9')) => d.parse().ok(),
+        _ => return Ok(()),
+    };
+    for k in keys::approve(choice) {
+        let mut args = vec!["send-keys", "-t", pane];
+        args.extend(k.args());
+        tmux::run(args)?;
     }
     Ok(())
 }

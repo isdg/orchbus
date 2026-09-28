@@ -73,8 +73,17 @@ Requests may carry fields a verb does not know; they are ignored.
 | `kill` | `{"uid"}` | `{"killed": true}`, or `false` when no pane had `uid` |
 | `list-panes` | `{}` | `[{"uid", "pane", "pid", "command"}]`, only panes with `@orchbus_uid`; `[]` when no tmux server runs |
 | `state` | `{"uid"}` | `{"pane", "state", "question"}`; `state` as in §2, `question` empty unless the agent is asking |
+| `approve` | `{"uid", "choice"?}` | `{"sent": true}`, or `false` when no approval menu is on screen; `choice` 1-9, default the highlighted option |
+| `cancel`, `interrupt` | `{"uid"}` | `{"sent": true}` |
+| `send` | `{"uid", "text"}` | `{"sent": true}`; `text` must be one non-empty line |
+| `capture` | `{"uid", "lines"?}` | `{"text"}`: the screen, plus `lines` of scrollback before it |
 
-`spawn` opens a detached window in `session`, creating the session with the agent as its first
+The helper talks to the default tmux server. `ORCHBUS_TMUX_SOCKET` names an exact socket
+instead, passed to tmux as `-S`; tests always set it, because `-S` never falls back to the
+user's own server the way a missing `TMUX_TMPDIR` does.
+
+`approve` re-reads the screen immediately before sending, so a menu that closed since the caller
+looked never receives a keystroke. `spawn` opens a detached window in `session`, creating the session with the agent as its first
 window when it does not exist, then sets `@orchbus_uid` on the pane. `env` is set in the pane's
 environment, which is how `ORCHBUS_POD_UID` and `ORCHBUS_NODE_SOCK` (§5) reach hooks. A pane whose
 process exits disappears from `list-panes`; the node reports that pod as terminated.
