@@ -32,12 +32,16 @@ Written back by the node:
 
 | Field | Meaning |
 |---|---|
-| annotation `orchbus.io/state` | `approve`, `input`, `running`, `idle`, `trust`, `rating`, `unknown` |
-| annotation `orchbus.io/question` | the live question, if any |
+| condition `orchbus.io/AwaitingApproval` | `True` while an approval menu shows; message is the question |
+| condition `orchbus.io/AwaitingInput` | `True` while the agent waits for a written reply; message is the question |
 | annotations `orchbus.io/cost-usd`, `orchbus.io/ctx-pct` | spend and context-window fill |
 | annotation `orchbus.io/pane` | tmux pane id, display only |
-| readiness gates `orchbus.io/AwaitingApproval`, `orchbus.io/Idle` | conditions for the operator |
+| condition `orchbus.io/Idle` | `True` at the prompt with the turn finished |
 | container state | `terminated` with exit code once the pane or process is gone, including after delete |
+
+Every `orchbus.io/*` condition carries the raw agent state as its reason: `Approve`, `Input`,
+`Running`, `Idle`, `Rating`, `Unknown`. State lives in pod status, which the node owns, rather than in
+annotations, which would give the node a second writer on pod metadata.
 
 Panes are identified by the pane option `@orchbus_uid=<pod uid>`, never by window name.
 
