@@ -1,3 +1,0 @@
-[env]
-# k8s-openapi needs one Kubernetes version per build; binaries pin it with a v1_* feature.
-K8S_OPENAPI_ENABLED_VERSION = "1.36"

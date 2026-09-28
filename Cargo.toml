@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/orchbus", "crates/orchbus-agent", "crates/orchbus-api"]
+members = ["crates/orchbus", "crates/orchbus-agent"]
 resolver = "2"
 
 [profile.release]
