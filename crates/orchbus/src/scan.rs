@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use orchbus_agent::agent;
 use orchbus_agent::classify::{classify, meta, state_from_rank, State};
 
-const TAIL_LINES: usize = 25;
+pub(crate) const TAIL_LINES: usize = 25;
 
 fn cache_path() -> String {
     let tmp = std::env::var("TMPDIR")
@@ -227,7 +227,7 @@ fn format_list(rows: &[Row]) -> String {
 }
 
 /// Last N lines of `s`, rejoined.
-fn last_lines(s: &str, n: usize) -> String {
+pub(crate) fn last_lines(s: &str, n: usize) -> String {
     let lines: Vec<&str> = s.lines().collect();
     let start = lines.len().saturating_sub(n);
     lines[start..].join("\n")
@@ -240,7 +240,7 @@ fn last_lines(s: &str, n: usize) -> String {
 /// are full of questions it already answered, and since the topic now holds the
 /// column unconditionally, an ungated match would staple stale scrollback onto
 /// every idle row. Whitespace is collapsed and tabs dropped so the TSV stays clean.
-fn live_question(text: &str, state: State) -> String {
+pub(crate) fn live_question(text: &str, state: State) -> String {
     if !matches!(state, State::Approve | State::Input) {
         return String::new();
     }

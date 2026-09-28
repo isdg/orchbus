@@ -19,6 +19,7 @@ mod ui;
 mod wait;
 mod fork;
 mod git;
+mod node;
 mod passthru;
 mod plan;
 mod review;
@@ -181,6 +182,12 @@ enum Cmd {
         /// The spawn slug.
         slug: String,
     },
+    /// Helper for orchbus-node: one JSON request on stdin, one JSON reply on stdout.
+    #[command(hide = true)]
+    Node {
+        #[command(subcommand)]
+        verb: node::Verb,
+    },
     /// Fork a spawned agent's session into a new divergent worktree.
     Fork {
         /// The parent spawn slug.
@@ -194,8 +201,9 @@ enum Cmd {
     },
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<std::process::ExitCode> {
     match Cli::parse().cmd {
+        Cmd::Node { verb } => return Ok(node::main(verb)),
         Cmd::Scan { cache, json, pane } => {
             tmux::require_server()?;
             let out = if json {
@@ -330,7 +338,7 @@ fn main() -> Result<()> {
             fork::run(&slug, tag.as_deref(), prompt.as_deref())?
         }
     }
-    Ok(())
+    Ok(std::process::ExitCode::SUCCESS)
 }
 
 /// Gate a bulk `--all` action behind a confirmation: no-op message when there's
