@@ -2,7 +2,7 @@
 //! a single-pane rescan (after approve/cancel) updates instantly without
 //! re-scanning every pane.
 //!
-//! Cache row (9 fields): rank <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> window_name <TAB> dir <TAB> topic <TAB> question
+//! Cache row (10 fields): rank <TAB> since <TAB> pane_id <TAB> glyph <TAB> agent <TAB> session:win <TAB> window_name <TAB> dir <TAB> topic <TAB> question
 //! List row  (2 fields): pane_id <TAB> "glyph dir session:win window_name agent topic [· question]"
 //!
 //! `dir` is the pane's working directory, stored home-relative (`~/cosmos-stih`)
@@ -31,6 +31,8 @@ fn cache_path() -> String {
 
 pub(crate) struct Row {
     pub(crate) rank: u8,
+    /// Unix seconds when this pane last entered its current state; 0 = unknown.
+    pub(crate) since: u64,
     pub(crate) pid: String,
     pub(crate) agent: String,
     pub(crate) glyph: String,
@@ -53,8 +55,9 @@ impl Row {
 
     fn cache_line(&self) -> String {
         format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             self.rank,
+            self.since,
             self.pid,
             self.glyph,
             self.agent,
@@ -107,20 +110,21 @@ impl Row {
         }
     }
     fn from_cache_line(line: &str) -> Option<Row> {
-        let f: Vec<&str> = line.splitn(9, '\t').collect();
-        if f.len() != 9 {
+        let f: Vec<&str> = line.splitn(10, '\t').collect();
+        if f.len() != 10 {
             return None;
         }
         Some(Row {
             rank: f[0].parse().unwrap_or(6),
-            pid: f[1].into(),
-            glyph: f[2].into(),
-            agent: f[3].into(),
-            swin: f[4].into(),
-            name: f[5].into(),
-            cwd: f[6].into(),
-            title: f[7].into(),
-            question: f[8].into(),
+            since: f[1].parse().unwrap_or(0),
+            pid: f[2].into(),
+            glyph: f[3].into(),
+            agent: f[4].into(),
+            swin: f[5].into(),
+            name: f[6].into(),
+            cwd: f[7].into(),
+            title: f[8].into(),
+            question: f[9].into(),
         })
     }
 }
@@ -149,7 +153,8 @@ fn home_relative(path: &str) -> String {
 /// has to outlive the command that renders it or every refresh would snap back.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Sort {
-    /// Attention first: rank, then pane_id. The triage order.
+    /// Attention first: rank, then the most recent state change, then pane_id.
+    /// The triage order — a pane that just finished leads its group.
     Rank,
     /// Directory first — the current one leading — then rank inside it.
     Dir,
@@ -264,6 +269,7 @@ fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, cwd: &str, title: &
 
     Some(Row {
         rank,
+        since: 0,
         pid: pid.into(),
         agent: agent.into(),
         glyph: glyph.into(),
@@ -336,7 +342,32 @@ fn full() -> Result<Vec<Row>> {
             }
         })
         .collect();
-    Ok(finalize(rows))
+    let prev = std::fs::read_to_string(cache_path()).ok();
+    let prev: Option<Vec<Row>> =
+        prev.map(|c| c.lines().filter_map(Row::from_cache_line).collect());
+    Ok(finalize(stamp(rows, prev.as_deref(), now())))
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Carry each pane's `since` over from `prev` while its state holds, and set it
+/// to `now` when the state changed or the pane is new. With no previous scan at
+/// all nothing is known to be recent, so every pane starts at 0.
+fn stamp(mut rows: Vec<Row>, prev: Option<&[Row]>, now: u64) -> Vec<Row> {
+    for r in &mut rows {
+        r.since = match prev {
+            None => 0,
+            Some(prev) => match prev.iter().find(|p| p.pid == r.pid) {
+                Some(p) if p.rank == r.rank => p.since,
+                _ => now,
+            },
+        };
+    }
+    rows
 }
 
 /// Rescan only `pid`, splicing its fresh row into the cached list (falls back to
@@ -347,12 +378,10 @@ fn splice(pid: &str) -> Result<Vec<Row>> {
         Err(_) => return full(),
     };
 
-    // Keep cached rows for every OTHER pane.
-    let mut rows: Vec<Row> = cache
-        .lines()
-        .filter_map(Row::from_cache_line)
-        .filter(|r| r.pid != pid)
-        .collect();
+    let cached: Vec<Row> =
+        cache.lines().filter_map(Row::from_cache_line).collect();
+    let (old, mut rows): (Vec<Row>, Vec<Row>) =
+        cached.into_iter().partition(|r| r.pid == pid);
 
     // Add this pane's fresh row if it's still a live agent pane.
     let panes = list_panes()?;
@@ -361,7 +390,7 @@ fn splice(pid: &str) -> Result<Vec<Row>> {
         if f.len() == 6 {
             if let Some(tag) = agent::detect(f[1]) {
                 if let Some(row) = scan_pane(f[0], tag, f[2], f[3], f[4], f[5]) {
-                    rows.push(row);
+                    rows.extend(stamp(vec![row], Some(&old), now()));
                 }
             }
         }
@@ -401,7 +430,12 @@ fn session_of(swin: &str) -> &str {
 /// "near me" means the directory first, since that is what the work is.
 pub(crate) fn order(rows: &mut [Row], mode: Sort, here: &str, here_session: &str) {
     match mode {
-        Sort::Rank => rows.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.pid.cmp(&b.pid))),
+        Sort::Rank => rows.sort_by(|a, b| {
+            a.rank
+                .cmp(&b.rank)
+                .then_with(|| b.since.cmp(&a.since))
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
         // Each `!=` is false (0) for a match, so matches sort first. An empty
         // `here`/`here_session` never equals a real value, which degrades to plain
         // alphabetical rather than privileging an arbitrary group.
@@ -463,6 +497,7 @@ mod tests {
     fn cache_line_round_trips_and_list_drops_rank() {
         let r = Row {
             rank: 1,
+            since: 1700000000,
             pid: "%3".into(),
             agent: "CC".into(),
             glyph: "[!]".into(),
@@ -476,6 +511,7 @@ mod tests {
         assert_eq!(back.pid, "%3");
         assert_eq!(back.agent, "CC");
         assert_eq!(back.name, "fix-flaky");
+        assert_eq!(back.since, 1700000000);
         assert_eq!(back.question, "proceed?");
         // list_line (fzf display) drops only rank: what the work is leads (dir,
         // agent, topic · question) and the tmux coordinates trail it.
@@ -491,6 +527,7 @@ mod tests {
         // so the 9-field split has to keep round-tripping with a trailing tab.
         let r = Row {
             rank: 3,
+            since: 0,
             pid: "%3".into(),
             agent: "CC".into(),
             glyph: "[*]".into(),
@@ -558,6 +595,7 @@ mod tests {
         let mk = |rank: u8, pid: &str| Row {
             cwd: "~/rc".into(),
             rank,
+            since: 0,
             pid: pid.into(),
             agent: "CC".into(),
             glyph: String::new(),
@@ -574,6 +612,7 @@ mod tests {
     fn drow(rank: u8, pid: &str, cwd: &str) -> Row {
         Row {
             rank,
+            since: 0,
             pid: pid.into(),
             agent: "CC".into(),
             glyph: "[=]".into(),
@@ -601,6 +640,43 @@ mod tests {
         order(&mut rows, Sort::Rank, "~/z", "");
         let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
         assert_eq!(got, vec!["%3", "%9", "%2"], "rank then pane_id");
+    }
+
+    #[test]
+    fn rank_sort_puts_the_latest_change_first_within_a_rank() {
+        let at = |rank, pid, since| Row { since, ..drow(rank, pid, "~/a") };
+        let mut rows = vec![
+            at(4, "%1", 100),
+            at(4, "%2", 300),
+            at(1, "%3", 50),
+            at(4, "%4", 200),
+            at(4, "%5", 200),
+        ];
+        order(&mut rows, Sort::Rank, "", "");
+        let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
+        assert_eq!(got, vec!["%3", "%2", "%4", "%5", "%1"]);
+    }
+
+    #[test]
+    fn stamp_keeps_since_while_the_state_holds_and_resets_on_change() {
+        let at = |rank, pid, since| Row { since, ..drow(rank, pid, "~/a") };
+        let prev = vec![at(3, "%1", 10), at(3, "%2", 20)];
+        let rows = vec![at(3, "%1", 0), at(4, "%2", 0), at(4, "%3", 0)];
+        let got: Vec<(String, u64)> = stamp(rows, Some(&prev), 99)
+            .into_iter()
+            .map(|r| (r.pid, r.since))
+            .collect();
+        // %1 unchanged keeps 10; %2 just finished and %3 is new: both now.
+        assert_eq!(
+            got,
+            vec![("%1".into(), 10), ("%2".into(), 99), ("%3".into(), 99)]
+        );
+    }
+
+    #[test]
+    fn stamp_without_a_previous_scan_claims_no_recency() {
+        let rows = stamp(vec![drow(4, "%1", "~/a")], None, 99);
+        assert_eq!(rows[0].since, 0);
     }
 
     #[test]
