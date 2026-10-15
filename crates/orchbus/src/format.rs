@@ -165,6 +165,7 @@ mod tests {
     fn row_in(rank: u8, glyph: &str, swin: &str, cwd: &str, title: &str, question: &str) -> Row {
         Row {
             rank,
+            since: 0,
             pid: "%1".into(),
             agent: "CC".into(),
             glyph: glyph.into(),
