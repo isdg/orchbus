@@ -278,11 +278,16 @@ pub(crate) fn observe(screen: &str, probe: Option<&Probe>) -> Observation {
             source: "screen",
         };
     };
-    let state = p.decide(scraped, shows_approve_menu(&text));
+    // The whole visible screen: a tall dialog's menu can sit above the tail.
+    let state = p.decide(scraped, shows_approve_menu(screen));
     let asking = matches!(state, State::Approve | State::Input);
     Observation {
         state,
-        question: if asking { p.question.replace('\t', " ") } else { String::new() },
+        question: match (asking, p.question.is_empty()) {
+            (false, _) => String::new(),
+            (true, true) => live_question(&text, state),
+            (true, false) => p.question.replace('\t', " "),
+        },
         tool_use_id: if state == State::Approve { p.tool_use_id.clone() } else { String::new() },
         source: "probe",
     }
@@ -815,5 +820,14 @@ mod tests {
         assert_eq!((o.question.as_str(), o.tool_use_id.as_str()), ("", ""));
         let o = observe(MENU, Some(&probe("idle")));
         assert_eq!((o.state, o.question.as_str()), (State::Idle, ""));
+    }
+
+    #[test]
+    fn observe_keeps_a_menu_the_probe_missed() {
+        let mut p = probe("running");
+        p.question.clear();
+        let o = observe(MENU, Some(&p));
+        assert_eq!(o.state, State::Approve);
+        assert_eq!(o.question, "Do you want to proceed?");
     }
 }

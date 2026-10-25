@@ -86,11 +86,11 @@ pub fn read(server: &Server, pane: &str) -> Option<Probe> {
 
 impl Probe {
     /// The pane's state, given what the screen shows. The screen only adds
-    /// what no hook sees: the rating prompt over an idle session, and that an
-    /// answered dialog is gone while its tool still runs.
+    /// what no hook sees: the rating prompt over an idle session, whether an
+    /// approval menu is up while the agent works (answered, or never seen).
     pub fn decide(&self, screen: State, has_menu: bool) -> State {
         match self.state {
-            Reported::Approve if has_menu => State::Approve,
+            Reported::Approve | Reported::Running if has_menu => State::Approve,
             Reported::Approve | Reported::Running => State::Running,
             Reported::Input => State::Input,
             Reported::Idle if screen == State::Rating => State::Rating,
@@ -169,6 +169,7 @@ mod tests {
         let p = |s| parse(&probe(s), &server()).unwrap();
         assert_eq!(p("idle").decide(State::Rating, true), State::Rating);
         assert_eq!(p("approve").decide(State::Running, false), State::Running);
+        assert_eq!(p("running").decide(State::Approve, true), State::Approve);
     }
 
     #[test]
@@ -179,6 +180,7 @@ mod tests {
         assert!(!approvable("  ❯ ", None));
         assert!(approvable(menu, Some(&p("approve"))));
         assert!(!approvable("  ❯ ", Some(&p("approve"))), "dialog answered");
+        assert!(approvable(menu, Some(&p("running"))), "a dialog no hook saw");
         assert!(!approvable(menu, Some(&p("input"))), "a question's menu");
         assert!(!approvable(menu, Some(&p("idle"))), "the rating menu");
     }
