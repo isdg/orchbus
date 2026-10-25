@@ -17,7 +17,9 @@
 use crate::tmux;
 use anyhow::{Context, Result};
 use orchbus_agent::agent;
-use orchbus_agent::classify::{classify, meta, state_from_rank, State};
+use orchbus_agent::classify::{classify, meta, shows_approve_menu, state_from_rank, State};
+use orchbus_agent::probe::{self, Probe, Server};
+use std::sync::OnceLock;
 
 pub(crate) const TAIL_LINES: usize = 25;
 
@@ -255,17 +257,62 @@ pub(crate) fn live_question(text: &str, state: State) -> String {
         .unwrap_or_default()
 }
 
+/// What a pane is doing: from its probe when it has a usable one (contract
+/// §5), else from the screen alone.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Observation {
+    pub(crate) state: State,
+    pub(crate) question: String,
+    pub(crate) tool_use_id: String,
+    pub(crate) source: &'static str,
+}
+
+pub(crate) fn observe(screen: &str, probe: Option<&Probe>) -> Observation {
+    let text = last_lines(screen, TAIL_LINES);
+    let scraped = classify(&text);
+    let Some(p) = probe else {
+        return Observation {
+            state: scraped,
+            question: live_question(&text, scraped),
+            tool_use_id: String::new(),
+            source: "screen",
+        };
+    };
+    let state = p.decide(scraped, shows_approve_menu(&text));
+    let asking = matches!(state, State::Approve | State::Input);
+    Observation {
+        state,
+        question: if asking { p.question.replace('\t', " ") } else { String::new() },
+        tool_use_id: if state == State::Approve { p.tool_use_id.clone() } else { String::new() },
+        source: "probe",
+    }
+}
+
+/// The default tmux server, asked once per process.
+fn server() -> Option<&'static Server> {
+    static SERVER: OnceLock<Option<Server>> = OnceLock::new();
+    SERVER
+        .get_or_init(|| {
+            let line = tmux::query(["display-message", "-p", probe::SERVER_FORMAT]);
+            line.ok().as_deref().and_then(Server::parse)
+        })
+        .as_ref()
+}
+
+/// The usable probe of a pane on the default server, if any.
+pub(crate) fn probe_of(pane: &str) -> Option<Probe> {
+    probe::read(server()?, pane)
+}
+
 /// Build a row for one pane, or `None` if it isn't a live agent pane worth
 /// showing. `agent` is the already-detected agent tag (e.g. CC).
 fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, cwd: &str, title: &str) -> Option<Row> {
     let full = tmux::query(["capture-pane", "-p", "-t", pid]).ok()?;
-    let text = last_lines(&full, TAIL_LINES);
-    if text.trim().is_empty() {
+    if last_lines(&full, TAIL_LINES).trim().is_empty() {
         return None;
     }
-    let state = classify(&text);
+    let Observation { state, question, .. } = observe(&full, probe_of(pid).as_ref());
     let (rank, glyph) = meta(state);
-    let question = live_question(&text, state);
 
     Some(Row {
         rank,
@@ -323,7 +370,7 @@ pub(crate) fn window_state(name: &str) -> Result<Option<(String, State)>> {
         return Ok(None);
     };
     let full = tmux::query(["capture-pane", "-p", "-t", &pid]).unwrap_or_default();
-    let state = classify(&last_lines(&full, TAIL_LINES));
+    let state = observe(&full, probe_of(&pid).as_ref()).state;
     Ok(Some((pid, state)))
 }
 
@@ -732,5 +779,41 @@ mod tests {
         order(&mut rows, Sort::Dir, "", "");
         let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
         assert_eq!(got, vec!["%2", "%1"]);
+    }
+
+    fn probe(state: &str) -> Probe {
+        let server = Server { socket: "/s".into(), pid: 1 };
+        let text = format!(
+            r#"{{"v":1,"state":"{state}","question":"Bash: git push",
+            "tool":"Bash","tool_use_id":"t1","server_pid":1}}"#
+        );
+        probe::parse(&text, &server).unwrap()
+    }
+
+    const MENU: &str = "Do you want to proceed?\n ❯ 1. Yes\n   2. No";
+
+    #[test]
+    fn observe_reads_the_screen_without_a_probe() {
+        let o = observe(MENU, None);
+        assert_eq!(o.state, State::Approve);
+        assert_eq!(o.question, "Do you want to proceed?");
+        assert_eq!((o.tool_use_id.as_str(), o.source), ("", "screen"));
+    }
+
+    #[test]
+    fn observe_takes_the_question_and_call_from_the_probe() {
+        let o = observe(MENU, Some(&probe("approve")));
+        assert_eq!(o.state, State::Approve);
+        assert_eq!(o.question, "Bash: git push");
+        assert_eq!((o.tool_use_id.as_str(), o.source), ("t1", "probe"));
+    }
+
+    #[test]
+    fn observe_drops_the_question_once_nothing_is_asked() {
+        let o = observe("✻ Running (3s · esc to interrupt)", Some(&probe("approve")));
+        assert_eq!(o.state, State::Running, "dialog answered, tool running");
+        assert_eq!((o.question.as_str(), o.tool_use_id.as_str()), ("", ""));
+        let o = observe(MENU, Some(&probe("idle")));
+        assert_eq!((o.state, o.question.as_str()), (State::Idle, ""));
     }
 }

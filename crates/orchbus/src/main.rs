@@ -31,7 +31,7 @@ mod tags;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use orchbus_agent::{classify, keys};
+use orchbus_agent::{classify, keys, probe};
 
 #[derive(Parser)]
 #[command(name = "orchbus", about = "tmux cockpit for Claude Code sessions")]
@@ -368,8 +368,8 @@ fn confirm(action: &str, n: usize, yes: bool) -> Result<bool> {
 /// so a stray key never lands on an idle/running/interrupted pane.
 fn approve(pane: &str, key: &str) -> Result<()> {
     let text = tmux::query(["capture-pane", "-p", "-t", pane]).unwrap_or_default();
-    if !classify::shows_approve_menu(&text) {
-        return Ok(()); // menu gone -> no-op
+    if !probe::approvable(&text, scan::probe_of(pane).as_ref()) {
+        return Ok(()); // menu gone, or the probe says nothing is asked -> no-op
     }
     let choice = match key {
         "enter" => None,

@@ -124,7 +124,9 @@ inside the agent to one file per tmux pane.
   `#{pid}` (pane ids restart with the server), when it does not parse, when
   `v` is unknown, and when `state` is `ended`; it then reads the screen.
 - A usable probe decides the state. The screen still adds `Rating` over an
-  `idle` probe, and covers the trust dialog, which precedes every hook.
+  `idle` probe, reads an `approve` probe with no menu left on screen as
+  `Running` (answered; the tool runs), and covers the trust dialog, which
+  precedes every hook.
 - `AskUserQuestion` is `input`, not `approve`: it is answered, not accepted.
 - Keystrokes stay guarded by the screen: `approve` sends only while the menu
   shows and a usable probe, if any, says `approve`.

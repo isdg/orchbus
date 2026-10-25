@@ -7,6 +7,7 @@
 use crate::scan;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
+use orchbus_agent::probe::{self, Probe, Server};
 use orchbus_agent::{classify, keys};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -75,6 +76,9 @@ struct ApproveReq {
     /// 1-based menu option; the highlighted default when absent.
     #[serde(default)]
     choice: Option<u8>,
+    /// The call the caller means to approve; refused unless it is the pending one.
+    #[serde(default)]
+    tool_use_id: Option<String>,
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -226,6 +230,12 @@ fn pane(uid: &str) -> Result<String> {
     Ok(pane_of(uid)?.with_context(|| format!("no pane for uid {uid}"))?.pane)
 }
 
+/// The usable probe of a pane on the server this helper talks to.
+fn probe_of(pane: &str) -> Option<Probe> {
+    let line = tmux(&["display-message", "-p", probe::SERVER_FORMAT]).ok()?;
+    probe::read(&Server::parse(&line)?, pane)
+}
+
 fn press(pane: &str, seq: &[keys::Keys]) -> Result<()> {
     for k in seq {
         let mut args = vec!["send-keys", "-t", pane];
@@ -242,7 +252,11 @@ fn approve(r: &ApproveReq) -> Result<bool> {
         bail!("choice must be 1-9");
     }
     let pane = pane(&r.uid)?;
-    if !classify::shows_approve_menu(&tmux(&["capture-pane", "-p", "-t", &pane])?) {
+    let probe = probe_of(&pane);
+    let screen = tmux(&["capture-pane", "-p", "-t", &pane])?;
+    let pending = probe.as_ref().map(|p| p.tool_use_id.as_str());
+    let named = r.tool_use_id.as_deref().is_none_or(|id| pending == Some(id));
+    if !named || !probe::approvable(&screen, probe.as_ref()) {
         return Ok(false);
     }
     press(&pane, &keys::approve(r.choice))?;
@@ -273,12 +287,13 @@ fn capture(r: &CaptureReq) -> Result<String> {
 fn state(uid: &str) -> Result<Value> {
     let p = pane_of(uid)?.with_context(|| format!("no pane for uid {uid}"))?;
     let screen = tmux(&["capture-pane", "-p", "-t", &p.pane])?;
-    let text = scan::last_lines(&screen, scan::TAIL_LINES);
-    let st = classify::classify(&text);
+    let o = scan::observe(&screen, probe_of(&p.pane).as_ref());
     Ok(json!({
         "pane": p.pane,
-        "state": classify::label(st),
-        "question": scan::live_question(&text, st),
+        "state": classify::label(o.state),
+        "question": o.question,
+        "tool_use_id": o.tool_use_id,
+        "source": o.source,
     }))
 }
 

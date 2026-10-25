@@ -30,6 +30,7 @@ impl Tmux {
         let mut child = Command::new(env!("CARGO_BIN_EXE_orchbus"))
             .args(["node", verb])
             .env("ORCHBUS_TMUX_SOCKET", &self.socket)
+            .env("XDG_STATE_HOME", &self.dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -82,7 +83,11 @@ fn pod_lifecycle_verbs_drive_a_real_tmux_server() {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    assert_eq!(st, json!({"pane": pane, "state": "approve", "question": "Do you want to proceed?"}));
+    assert_eq!(
+        st,
+        json!({"pane": pane, "state": "approve", "question": "Do you want to proceed?",
+               "tool_use_id": "", "source": "screen"})
+    );
 
     let (_, panes) = t.node("list-panes", json!({}));
     let uids: Vec<&str> = panes.as_array().unwrap().iter().map(|p| p["uid"].as_str().unwrap()).collect();
@@ -134,4 +139,58 @@ fn action_verbs_answer_menus_only_while_they_show() {
     assert_eq!(t.node("interrupt", json!({"uid": "a1"})), (true, json!({"sent": true})));
     let (ok, err) = t.node("approve", json!({"uid": "nope"}));
     assert!(!ok && err["error"].as_str().unwrap().contains("no pane for uid nope"));
+}
+
+impl Tmux {
+    /// Write `pane`'s probe file (contract §5) as the plugin would; `pid` 0
+    /// stands for the live server's.
+    fn probe(&self, pane: &str, state: &str, pid: u32) {
+        let out = Command::new("tmux")
+            .arg("-S")
+            .arg(&self.socket)
+            .args(["display-message", "-p", "#{socket_path}\t#{pid}"])
+            .output()
+            .unwrap();
+        let line = String::from_utf8(out.stdout).unwrap();
+        let (socket, live) = line.trim_end().rsplit_once('\t').unwrap();
+        let pid = if pid == 0 { live.parse().unwrap() } else { pid };
+        let sock: String =
+            socket.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        let dir = self.dir.join("orchbus/panes").join(sock);
+        std::fs::create_dir_all(&dir).unwrap();
+        let record = json!({"v": 1, "state": state, "question": "Bash: git push",
+            "tool": "Bash", "tool_use_id": "t1", "server_pid": pid, "pane": pane});
+        let file = dir.join(format!("{}.json", pane.trim_start_matches('%')));
+        std::fs::write(file, record.to_string()).unwrap();
+    }
+}
+
+#[test]
+fn the_probe_outranks_the_screen_and_guards_approve() {
+    let Some(t) = Tmux::new() else { return };
+    let script = r#"printf 'Do you want to proceed?\n ❯ 1. Yes\n   2. No\n'; read a; echo "got:$a"; sleep 30"#;
+    let (ok, r) = t.node("spawn", agent("p1", script));
+    assert!(ok, "{r}");
+    let pane = r["pane"].as_str().unwrap().to_string();
+    wait_for(&t, "p1", "Do you want to proceed?");
+    let state = || t.node("state", json!({"uid": "p1"})).1;
+    let approve = |req: Value| t.node("approve", req).1["sent"].clone();
+
+    t.probe(&pane, "input", 0);
+    assert_eq!(state()["state"], "input", "a question's menu is not an approval");
+    assert_eq!(state()["source"], "probe");
+    assert_eq!(approve(json!({"uid": "p1"})), false);
+
+    t.probe(&pane, "approve", 1);
+    assert_eq!(state()["source"], "screen", "a probe from another server is ignored");
+
+    t.probe(&pane, "approve", 0);
+    assert_eq!(
+        state(),
+        json!({"pane": pane, "state": "approve", "question": "Bash: git push",
+               "tool_use_id": "t1", "source": "probe"})
+    );
+    assert_eq!(approve(json!({"uid": "p1", "tool_use_id": "t0"})), false, "another call");
+    assert_eq!(approve(json!({"uid": "p1", "tool_use_id": "t1"})), true);
+    assert!(wait_for(&t, "p1", "got:").contains("got:"));
 }

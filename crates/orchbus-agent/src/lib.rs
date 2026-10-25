@@ -4,4 +4,5 @@
 pub mod agent;
 pub mod classify;
 pub mod keys;
+pub mod probe;
 pub mod transcript;
