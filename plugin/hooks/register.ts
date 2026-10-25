@@ -22,11 +22,8 @@ type Probe = {
   mainQuestion: string
   shown: State | undefined
   since: number
-  unnamed: number
-  // Pending asks by tool_use_id, or by a local key when none could be matched.
+  // Pending asks by tool_use_id.
   asks: Map<string, Ask>
-  // The tool_use_id of each call core put to a decider, by tool and input.
-  checked: Map<string, string>
   writes: Promise<void>
 }
 
@@ -47,9 +44,6 @@ const oneLine = (text: string) =>
 
 const field = (args: Record<string, unknown>, name: string) =>
   typeof args[name] === 'string' ? (args[name] as string) : undefined
-
-const keyOf = (tool: string, input: unknown) =>
-  `${tool}\0${JSON.stringify(input)}`
 
 function asking(tool: string, input: unknown, id: string): Ask {
   const args = (input ?? {}) as Record<string, unknown>
@@ -121,23 +115,8 @@ function publish($: EngineInterface, p: Probe) {
   return p.writes
 }
 
-function settle(p: Probe, id: string, tool: string) {
-  let changed = p.asks.delete(id)
-  for (const [key, ask] of p.asks) {
-    if (!ask.tool_use_id && ask.tool === tool) {
-      p.asks.delete(key)
-      changed = true
-    }
-  }
-  for (const [key, checkedId] of p.checked) {
-    if (checkedId === id) p.checked.delete(key)
-  }
-  return changed
-}
-
 function reset(p: Probe, state: State, question = '') {
   p.asks.clear()
-  p.checked.clear()
   p.main = state
   p.mainQuestion = question
 }
@@ -149,9 +128,7 @@ export const register: Register = on => {
     mainQuestion: '',
     shown: undefined,
     since: 0,
-    unnamed: 0,
     asks: new Map(),
-    checked: new Map(),
     writes: Promise.resolve(),
   }
 
@@ -180,25 +157,16 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // An ask may settle with no dialog (auto mode's classifier, nobody to ask);
+  // readers trust `approve` only while the menu is on screen (contract §5).
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
-    if (verdict.decision === 'ask' && e.tool_use_id) {
-      p.checked.set(keyOf(e.tool, e.input), e.tool_use_id)
-    }
-    return verdict
-  }).catch(($, e, next) => next(e))
-
-  // Raised only when a person is about to be asked: the dialog is up unless
-  // a hook beneath answers it first.
-  on('classic.PermissionRequest', async ($, e, next) => {
-    const answered = await next(e)
-    if (answered.decision === undefined) {
-      const id = p.checked.get(keyOf(e.tool_name, e.tool_input)) ?? ''
-      const key = id || `unnamed:${++p.unnamed}`
-      p.asks.set(key, asking(e.tool_name, e.tool_input, id))
+    const id = e.tool_use_id
+    if (verdict.decision === 'ask' && id) {
+      p.asks.set(id, asking(e.tool, e.input, id))
       await publish($, p)
     }
-    return answered
+    return verdict
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
@@ -209,7 +177,7 @@ export const register: Register = on => {
     try {
       return await next(e)
     } finally {
-      if (settle(p, e.tool_use_id, e.tool)) await publish($, p)
+      if (p.asks.delete(e.tool_use_id)) await publish($, p)
     }
   }).catch(($, e, next) => next(e))
 

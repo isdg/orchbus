@@ -125,33 +125,25 @@ test("a subagent's turns leave the main state alone", async ($, on) => {
 
 test('a permission ask is approve until the call settles', async ($, on) => {
   const w = world(on)
+  let during: Record | undefined
   on('tool.check', () => ({ decision: 'ask' }))
-  // No test plays the person's answer: unanswered, the ask ends denied.
-  on('classic.PermissionRequest', () => ({}))
-  on('tool.call', () => ({ result: {} }))
+  // No test plays the person's yes: a PermissionRequest answer stands for it.
+  on('classic.PermissionRequest', () => ({
+    decision: { behavior: 'allow' as const },
+  }))
+  on('tool.call', () => {
+    during = w.last()
+    return { result: {} }
+  })
   await start($)
   await $.turn.start({ text: 'go', turnId: 't1' })
   await $.tool.call({ tool: 'Bash', command: 'git push\nmore' })
 
-  const asked = w.writes.find(x => x.record.state === 'approve')?.record
-  expect(asked?.question).toBe('Bash: git push')
-  expect(asked?.tool).toBe('Bash')
-  expect(String(asked?.tool_use_id)).not.toBe('')
+  expect(during?.state).toBe('approve')
+  expect(during?.question).toBe('Bash: git push')
+  expect(during?.tool).toBe('Bash')
+  expect(String(during?.tool_use_id)).not.toBe('')
   expect(w.states()).toEqual(['idle', 'running', 'approve', 'running'])
-})
-
-test('an ask a hook beneath answers never reads approve', async ($, on) => {
-  const w = world(on)
-  on('tool.check', () => ({ decision: 'ask' }))
-  on('classic.PermissionRequest', () => ({
-    decision: { behavior: 'allow' as const },
-  }))
-  on('tool.call', () => ({ result: {} }))
-  await start($)
-  await $.turn.start({ text: 'go', turnId: 't1' })
-  await $.tool.call({ tool: 'Bash', command: 'ls' })
-
-  expect(w.states()).toEqual(['idle', 'running'])
 })
 
 test('a call nobody is asked about never reads approve', async ($, on) => {
