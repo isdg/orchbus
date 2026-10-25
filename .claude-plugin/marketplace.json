@@ -1,0 +1,11 @@
+{
+  "name": "orchbus",
+  "owner": { "name": "isdg" },
+  "plugins": [
+    {
+      "name": "orchbus-probe",
+      "source": "./plugin",
+      "description": "Report each Claude Code session's state to orchbus"
+    }
+  ]
+}

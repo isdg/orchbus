@@ -234,9 +234,28 @@ Tell a driving session to prefer these commands (e.g. via a `CLAUDE.md`
 contract) when you want its orchestration to be watchable and approvable rather
 than hidden.
 
+## The probe — exact state from inside Claude Code
+
+The screen is a guess. `plugin/` is a Claude Code plugin, `orchbus-probe`,
+that reports each session's state from its own events: a permission dialog
+about to show, a turn starting or ending (interrupted included), a question
+put to you, the session ending. It writes one JSON file per tmux pane under
+`~/.local/state/orchbus/panes/`, and orchbus reads that before the screen
+(contract §5). Sessions without it fall back to the scrape.
+
+Enable it for every session — the marketplace is this repository:
+
+```sh
+claude plugin marketplace add isdg/orchbus
+claude plugin install orchbus-probe@orchbus
+```
+
+`claude plugin test plugin` runs its tests. The plugin API it uses (function
+hooks) is early access and can change between Claude Code releases.
+
 ## Maintenance
 
-It's screen-scraping, so the CC TUI changing its wording/glyphs can throw off
+Without the probe it's screen-scraping, so the CC TUI changing its wording/glyphs can throw off
 classification. All the fragile patterns live in **one module, `crates/orchbus/src/classify.rs`**
 (the `PATTERN TABLE` — `RATING`, `APPROVE_MENU`, … regexes), used by both the
 scanner and the approve guard. Fix them there. The most robust signals are

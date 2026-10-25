@@ -1,0 +1,5 @@
+{
+  "name": "orchbus-probe",
+  "version": "0.1.0",
+  "description": "Report each Claude Code session's state to orchbus, per tmux pane"
+}

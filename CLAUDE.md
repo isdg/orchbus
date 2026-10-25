@@ -57,5 +57,7 @@ Notes:
 - Rust; `cargo test` and `cargo build` must stay green with **no warnings**.
 - All TUI-reading regexes live in `crates/orchbus/src/classify.rs` (the PATTERN TABLE) — the
   scanner and the approve guard share them; fix classification there.
+- `plugin/` is the `orchbus-probe` Claude Code plugin (contract §5); keep
+  `claude plugin validate plugin` and `claude plugin test plugin` green.
 - `crates/orchbus/src/scan.rs` enumerates panes; `crates/orchbus/src/spawn.rs`/`review.rs`/`revise.rs`/
   `fork.rs`/`wait.rs` are the loop verbs; `crates/orchbus/src/state.rs` is the per-slug store.
