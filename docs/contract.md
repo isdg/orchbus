@@ -80,8 +80,8 @@ Requests may carry fields a verb does not know; they are ignored.
 | `spawn` | `{"uid", "session", "name", "cwd", "argv": [..], "env": {..}}` | `{"pane": "%12"}`; the existing pane when `uid` already runs |
 | `kill` | `{"uid"}` | `{"killed": true}`, or `false` when no pane had `uid` |
 | `list-panes` | `{}` | `[{"uid", "pane", "pid", "command"}]`, only panes with `@orchbus_uid`; `[]` when no tmux server runs |
-| `state` | `{"uid"}` | `{"pane", "state", "question"}`; `state` as in §2, `question` empty unless the agent is asking |
-| `approve` | `{"uid", "choice"?}` | `{"sent": true}`, or `false` when no approval menu is on screen; `choice` 1-9, default the highlighted option |
+| `state` | `{"uid"}` | `{"pane", "state", "question", "tool_use_id", "source"}`; `state` as in §2, `question` empty unless the agent is asking, `tool_use_id` the pending call when the probe names one, `source` `probe` or `screen` (§5) |
+| `approve` | `{"uid", "choice"?, "tool_use_id"?}` | `{"sent": true}`, or `false` when no approval menu is on screen, the probe says the agent is not asking for approval, or `tool_use_id` is not the call it is asking about; `choice` 1-9, default the highlighted option |
 | `cancel`, `interrupt` | `{"uid"}` | `{"sent": true}` |
 | `send` | `{"uid", "text"}` | `{"sent": true}`; `text` must be one non-empty line |
 | `capture` | `{"uid", "lines"?}` | `{"text"}`: the screen, plus `lines` of scrollback before it |
@@ -93,18 +93,41 @@ user's own server the way a missing `TMUX_TMPDIR` does.
 `approve` re-reads the screen immediately before sending, so a menu that closed since the caller
 looked never receives a keystroke. `spawn` opens a detached window in `session`, creating the session with the agent as its first
 window when it does not exist, then sets `@orchbus_uid` on the pane. `env` is set in the pane's
-environment, which is how `ORCHBUS_POD_UID` and `ORCHBUS_NODE_SOCK` (§5) reach hooks. A pane whose
+environment, which is how `ORCHBUS_POD_UID` (§5) reaches the probe. A pane whose
 process exits disappears from `list-panes`; the node reports that pod as terminated.
 
-## 5. Hooks
+## 5. Probe
 
-- Agents are started with `claude --settings <file>` whose hooks run `orchbus hook`.
-- The pane environment carries `ORCHBUS_NODE_SOCK` and `ORCHBUS_POD_UID`.
-- `orchbus hook` reads the Claude Code hook JSON on stdin and writes one line
-  `{"pod_uid", "event", "session_id", "tool_name", "tool_use_id", "message", "ts"}` to the socket,
-  then exits 0. It never blocks the agent.
-- The node dedupes by `(session_id, event, tool_use_id)`. Hooks are a hint: the node still checks the
-  screen before sending any keystroke, and after a declined permission no Stop event arrives.
+The screen is a fallback. The authority is the probe: the `orchbus-probe`
+Claude Code plugin, enabled for every session, writes the agent's state from
+inside the agent to one file per tmux pane.
+
+- Path: `${XDG_STATE_HOME:-~/.local/state}/orchbus/panes/<sock>/<n>.json`.
+  `<sock>` is the tmux socket path with every non-alphanumeric character
+  replaced by `-`; `<n>` is the pane id without its `%`. The probe reads both
+  from `$TMUX` and `$TMUX_PANE`, and writes nothing outside tmux.
+- Content, one JSON object:
+
+  | Field | Meaning |
+  |---|---|
+  | `v` | format version, `1` |
+  | `state` | `running`, `idle`, `approve`, `input` or `ended` |
+  | `question` | one line, no tabs; empty unless `approve` or `input` |
+  | `tool`, `tool_use_id` | the call awaiting the person, else empty |
+  | `session_id` | the Claude Code session |
+  | `server_pid` | the tmux server's pid, from `$TMUX` |
+  | `pane` | the pane id, `%12` |
+  | `pod_uid` | `$ORCHBUS_POD_UID`, when set |
+  | `since`, `updated` | ms since the epoch: the state's start, the write |
+
+- A reader ignores the file when `server_pid` is not the live server's
+  `#{pid}` (pane ids restart with the server), when it does not parse, when
+  `v` is unknown, and when `state` is `ended`; it then reads the screen.
+- A usable probe decides the state. The screen still adds `Rating` over an
+  `idle` probe, and covers the trust dialog, which precedes every hook.
+- `AskUserQuestion` is `input`, not `approve`: it is answered, not accepted.
+- Keystrokes stay guarded by the screen: `approve` sends only while the menu
+  shows and a usable probe, if any, says `approve`.
 
 ## 6. Approval
 
