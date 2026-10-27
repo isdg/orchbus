@@ -19,6 +19,7 @@ use anyhow::{Context, Result};
 use orchbus_agent::agent;
 use orchbus_agent::classify::{classify, meta, shows_approve_menu, state_from_rank, State};
 use orchbus_agent::probe::{self, Probe, Server};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 pub(crate) const TAIL_LINES: usize = 25;
@@ -35,6 +36,9 @@ pub(crate) struct Row {
     pub(crate) rank: u8,
     /// Unix seconds when this pane last entered its current state; 0 = unknown.
     pub(crate) since: u64,
+    /// The window's `@seen` visit ticket; 0 = never visited. Read fresh on
+    /// every order rather than cached: a window switch doesn't trigger a scan.
+    pub(crate) seen: u64,
     pub(crate) pid: String,
     pub(crate) agent: String,
     pub(crate) glyph: String,
@@ -119,6 +123,7 @@ impl Row {
         Some(Row {
             rank: f[0].parse().unwrap_or(6),
             since: f[1].parse().unwrap_or(0),
+            seen: 0,
             pid: f[2].into(),
             glyph: f[3].into(),
             agent: f[4].into(),
@@ -155,6 +160,9 @@ fn home_relative(path: &str) -> String {
 /// has to outlive the command that renders it or every refresh would snap back.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Sort {
+    /// Rank, then the most recently visited window inside it — where you were
+    /// working leads its tier. Unstamped windows fall back to `Rank`'s order.
+    Visited,
     /// Attention first: rank, then the most recent state change, then pane_id.
     /// The triage order — a pane that just finished leads its group.
     Rank,
@@ -169,6 +177,7 @@ fn sort_path() -> String {
 /// The persisted word for a mode — also what `orchbus sort` prints.
 pub(crate) fn sort_label(mode: Sort) -> &'static str {
     match mode {
+        Sort::Visited => "visited",
         Sort::Dir => "dir",
         Sort::Rank => "rank",
     }
@@ -176,16 +185,18 @@ pub(crate) fn sort_label(mode: Sort) -> &'static str {
 
 pub(crate) fn sort_mode() -> Sort {
     match std::fs::read_to_string(sort_path()).as_deref().map(str::trim) {
+        Ok("rank") => Sort::Rank,
         Ok("dir") => Sort::Dir,
-        _ => Sort::Rank,
+        _ => Sort::Visited,
     }
 }
 
-/// Flip the persisted mode and report the new one (for `orchbus sort --toggle`).
+/// Cycle the persisted mode and report the new one (`orchbus sort --toggle`).
 pub(crate) fn toggle_sort() -> Sort {
     let next = match sort_mode() {
+        Sort::Visited => Sort::Rank,
         Sort::Rank => Sort::Dir,
-        Sort::Dir => Sort::Rank,
+        Sort::Dir => Sort::Visited,
     };
     let _ = std::fs::write(sort_path(), sort_label(next));
     next
@@ -198,7 +209,9 @@ pub(crate) fn toggle_sort() -> Sort {
 ///   collect(false, Some(id)) -> rescan only that pane, splice into the cache
 pub(crate) fn collect(cache: bool, pane: Option<String>) -> Result<Vec<Row>> {
     if cache {
-        return Ok(read_cache_rows());
+        let mut rows = read_cache_rows();
+        arrange(&mut rows);
+        return Ok(rows);
     }
     match pane {
         Some(p) => splice(&p),
@@ -322,6 +335,7 @@ fn scan_pane(pid: &str, agent: &str, swin: &str, name: &str, cwd: &str, title: &
     Some(Row {
         rank,
         since: 0,
+        seen: 0,
         pid: pid.into(),
         agent: agent.into(),
         glyph: glyph.into(),
@@ -482,6 +496,13 @@ fn session_of(swin: &str) -> &str {
 /// "near me" means the directory first, since that is what the work is.
 pub(crate) fn order(rows: &mut [Row], mode: Sort, here: &str, here_session: &str) {
     match mode {
+        Sort::Visited => rows.sort_by(|a, b| {
+            a.rank
+                .cmp(&b.rank)
+                .then_with(|| b.seen.cmp(&a.seen))
+                .then_with(|| b.since.cmp(&a.since))
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
         Sort::Rank => rows.sort_by(|a, b| {
             a.rank
                 .cmp(&b.rank)
@@ -510,10 +531,41 @@ pub(crate) fn order(rows: &mut [Row], mode: Sort, here: &str, here_session: &str
     }
 }
 
+/// Each pane's window `@seen` ticket, which the user's tmux config stamps on
+/// every window change. Without that hook it is empty and `Visited` reads as
+/// `Rank`.
+fn visits() -> HashMap<String, u64> {
+    let out = tmux::query(["list-panes", "-a", "-F", "#{pane_id}\t#{@seen}"]);
+    parse_visits(&out.unwrap_or_default())
+}
+
+fn parse_visits(listing: &str) -> HashMap<String, u64> {
+    listing
+        .lines()
+        .filter_map(|l| {
+            let (pid, seen) = l.split_once('\t')?;
+            Some((pid.to_string(), seen.parse().ok()?))
+        })
+        .collect()
+}
+
+/// Order rows for the active view as of now. The cached paint goes through
+/// this too, since visits and the opening directory move without a rescan.
+fn arrange(rows: &mut [Row]) {
+    let mode = sort_mode();
+    if mode == Sort::Visited {
+        let seen = visits();
+        for r in rows.iter_mut() {
+            r.seen = seen.get(&r.pid).copied().unwrap_or(0);
+        }
+    }
+    order(rows, mode, &here(), &here_session());
+}
+
 /// Order the rows for the active view and cache atomically (WITH rank so a later
 /// splice can re-sort), returning them for a formatter to render.
 fn finalize(mut rows: Vec<Row>) -> Vec<Row> {
-    order(&mut rows, sort_mode(), &here(), &here_session());
+    arrange(&mut rows);
 
     let cache_body = rows
         .iter()
@@ -550,6 +602,7 @@ mod tests {
         let r = Row {
             rank: 1,
             since: 1700000000,
+            seen: 0,
             pid: "%3".into(),
             agent: "CC".into(),
             glyph: "[!]".into(),
@@ -580,6 +633,7 @@ mod tests {
         let r = Row {
             rank: 3,
             since: 0,
+            seen: 0,
             pid: "%3".into(),
             agent: "CC".into(),
             glyph: "[*]".into(),
@@ -648,6 +702,7 @@ mod tests {
             cwd: "~/rc".into(),
             rank,
             since: 0,
+            seen: 0,
             pid: pid.into(),
             agent: "CC".into(),
             glyph: String::new(),
@@ -665,6 +720,7 @@ mod tests {
         Row {
             rank,
             since: 0,
+            seen: 0,
             pid: pid.into(),
             agent: "CC".into(),
             glyph: "[=]".into(),
@@ -707,6 +763,48 @@ mod tests {
         order(&mut rows, Sort::Rank, "", "");
         let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
         assert_eq!(got, vec!["%3", "%2", "%4", "%5", "%1"]);
+    }
+
+    #[test]
+    fn visited_sort_keeps_rank_then_leads_each_tier_with_the_last_visit() {
+        let at = |rank, pid, seen, since| Row {
+            seen,
+            since,
+            ..drow(rank, pid, "~/a")
+        };
+        let mut rows = vec![
+            at(4, "%1", 9, 100),
+            at(1, "%2", 2, 500),
+            at(1, "%3", 7, 50),
+            at(4, "%4", 0, 900),
+            at(1, "%5", 7, 80),
+        ];
+        order(&mut rows, Sort::Visited, "", "");
+        let got: Vec<&str> = rows.iter().map(|r| r.pid.as_str()).collect();
+        // A visit never lifts a pane out of its tier; within one, the newer
+        // visit leads, a shared window falls to `since`, then the unvisited.
+        assert_eq!(got, vec!["%5", "%3", "%2", "%1", "%4"]);
+    }
+
+    #[test]
+    fn visited_sort_without_stamps_is_the_rank_sort() {
+        let at = |rank, pid, since| Row { since, ..drow(rank, pid, "~/a") };
+        let rows = || vec![at(4, "%1", 100), at(4, "%2", 300), at(1, "%3", 50)];
+        let (mut v, mut r) = (rows(), rows());
+        order(&mut v, Sort::Visited, "", "");
+        order(&mut r, Sort::Rank, "", "");
+        let pids = |x: &[Row]| -> Vec<String> {
+            x.iter().map(|r| r.pid.clone()).collect()
+        };
+        assert_eq!(pids(&v), pids(&r));
+    }
+
+    #[test]
+    fn parse_visits_skips_unstamped_windows() {
+        let got = parse_visits("%1\t41\n%2\t\n%3\t7");
+        assert_eq!(got.get("%1"), Some(&41));
+        assert_eq!(got.get("%2"), None);
+        assert_eq!(got.get("%3"), Some(&7));
     }
 
     #[test]

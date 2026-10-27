@@ -56,11 +56,12 @@ enum Cmd {
     /// Print the cockpit's header line (mode + keys) — fzf re-runs this through
     /// transform-header after ctrl-g so the label tracks the mode.
     Header,
-    /// Show or flip the cockpit's row order: attention rank, or grouped by
-    /// directory with the current one first. The choice persists, so the
-    /// cockpit's ~1s auto-refresh keeps whichever view you picked.
+    /// Show or cycle the cockpit's row order: attention rank with the last
+    /// visited window first in each tier (default), attention rank with the
+    /// latest state change first, or grouped by directory with the current one
+    /// first. The choice persists, so the ~1s auto-refresh keeps the view.
     Sort {
-        /// Flip to the other order and print the new one.
+        /// Step to the next order and print it.
         #[arg(long)]
         toggle: bool,
     },

@@ -74,8 +74,11 @@ float to the top:
 [!] approve  >  [?] input  >  [*] running  >  [=] idle  >  [o] rating  >  [.] unknown
 ```
 
-Within a tier, rows are ordered by `pane_id` so the list is deterministic across
-the ~1s auto-refresh. The ranking lives in one place — the `meta` function in
+Within a tier, the window you **visited** most recently leads, so the session you
+were just working in sits at the top of its tier rather than wherever its pane id
+puts it. Ties (panes sharing a window, windows never visited) fall to the latest
+state change, then `pane_id`, so the list is deterministic across the ~1s
+auto-refresh. The ranking lives in one place — the `meta` function in
 `crates/orchbus/src/classify.rs` (`Approve => 1 … Unknown => 6`); edit those numbers to reorder.
 
 Because the list is state-sorted, approving a `[!]` makes it change state and
@@ -83,11 +86,20 @@ sink down the list, so the next actionable session rises toward your cursor —
 the intended triage flow. The trade-off is that the highlighted row can shift
 under you on a refresh; sort by `pane_id` alone (a fixed position) if you prefer.
 
-#### Directory view — `ctrl-g`
+Visits are the `@seen` ticket a tmux hook stamps on each window as you move to
+it (see omni's README, *Visited*); orchbus only reads it. Without that hook every
+window reads as unvisited and the order is the `rank` view below. Visits are read
+fresh on every paint, including the instant one from cache, since moving between
+windows changes them without a rescan.
 
-`ctrl-g` flips between the importance order above and a **directory** order:
-groups sorted by working directory with **the directory you opened the cockpit
-from first**, and the same importance ranking *inside* each group. It is the
+#### Other views — `ctrl-g`
+
+`ctrl-g` cycles `visited` (the order above) → `rank` → `dir`. **rank** is the
+same tiers with the latest state change first inside each, the pure triage
+order: a pane that just started asking leads its tier even if you have not been
+there in hours. **dir** groups rows by working directory, with **the directory
+you opened the cockpit from first**, and the same importance ranking *inside*
+each group. It is the
 `claude agents` layout — useful when you are looking for a known session rather
 than triaging whatever is loudest.
 
@@ -98,7 +110,7 @@ importance stays the default and this is a toggle.
 The choice persists (a file next to the cache), because the ~1s auto-refresh
 re-runs `scan` as a fresh process — a mode held inside fzf would snap back to
 importance on every reload. `orchbus sort` prints the current mode;
-`orchbus sort --toggle` flips it from a shell.
+`orchbus sort --toggle` steps it from a shell.
 
 ### Keys (inside the popup)
 
@@ -107,7 +119,7 @@ importance on every reload. `orchbus sort` prints the current mode;
 | `ctrl-a` | **approve** — accept the highlighted default "Yes" (safe primary) |
 | `ctrl-i` | **interrupt** the agent (Esc) — also fires on `Tab`, see below |
 | `ctrl-x` | **kill the pane** — immediate, no confirm; the agent dies with it |
-| `ctrl-g` | **sort** (toggle) — importance, or by directory with the current one first |
+| `ctrl-g` | **sort** (cycle) — visited, rank, or by directory with the current one first |
 | `ctrl-r` | refresh now |
 | `enter`  | **jump** to that pane (closes the popup) |
 | type     | fuzzy-filter the list |

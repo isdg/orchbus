@@ -166,6 +166,7 @@ mod tests {
         Row {
             rank,
             since: 0,
+            seen: 0,
             pid: "%1".into(),
             agent: "CC".into(),
             glyph: glyph.into(),
