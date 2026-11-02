@@ -7,7 +7,7 @@
 #
 # This entry point binds no keys. It resolves and self-heals the binary and
 # leaves the key map to your own tmux.conf, so one file owns every binding and a
-# plugin update can never move a key underneath you. README.md carries a block
+# plugin update can never move a key underneath you. README.txt carries a block
 # of suggested bindings to paste.
 #
 # Install via TPM (~/.tmux.conf):
